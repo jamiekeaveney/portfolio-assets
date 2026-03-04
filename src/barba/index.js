@@ -19,6 +19,26 @@ const setCursorBusy = (on) =>
 
 const resetScrollTop = () => window.scrollTo(0, 0);
 
+// Queue for callbacks that must run after the transition + IX2 init + ST refresh.
+// Features like scroll-1 register here so their STs are created against a settled layout.
+let _postTransitionCallbacks = [];
+
+// Strip any CSS custom properties (--*) set as inline styles on :root and body.
+// IX2 "while scrolling in view" interactions tween CSS vars (e.g. --scroll-progress)
+// on these elements. They persist across Barba navigations, causing the new container
+// to flash the old scroll-driven state at the start of the enter animation.
+function resetIX2CSSVars() {
+  [document.documentElement, document.body].forEach((el) => {
+    try {
+      const toRemove = [];
+      for (let i = 0; i < el.style.length; i++) {
+        if (el.style[i].startsWith("--")) toRemove.push(el.style[i]);
+      }
+      toRemove.forEach((prop) => el.style.removeProperty(prop));
+    } catch (_) {}
+  });
+}
+
 function getNamespace(data, which = "next") {
   const obj = data?.[which];
   return (
@@ -55,7 +75,12 @@ export function initBarba({ initContainer }) {
     history.scrollRestoration = "manual";
   } catch (_) {}
 
-  window.barba.hooks.before(() => setCursorBusy(true));
+  // Update nav state immediately at click — don't wait for transition to finish.
+  window.barba.hooks.before((data) => {
+    setCursorBusy(true);
+    resetWCurrent(data?.next?.url?.path);
+  });
+
   window.barba.hooks.after(() => setCursorBusy(false));
 
   window.barba.hooks.after((data) => {
@@ -85,6 +110,16 @@ export function initBarba({ initContainer }) {
     //    snaps/bounces at the scroll boundary.
     try { window.lenis?.resize?.(); } catch (_) {}
 
+    // 5. Run deferred post-transition callbacks (e.g. scroll-1 ST creation).
+    //    These need to fire AFTER IX2 has settled the layout AND after the
+    //    animation inline styles are gone — exactly here.
+    if (_postTransitionCallbacks.length) {
+      _postTransitionCallbacks.forEach((fn) => { try { fn(); } catch (_) {} });
+      _postTransitionCallbacks = [];
+      // One final refresh to pick up any STs created by the callbacks.
+      safeRefreshScrollTrigger();
+    }
+
     resetWCurrent();
     clearFromPanel();
   });
@@ -112,10 +147,12 @@ export function initBarba({ initContainer }) {
         },
 
         async afterEnter(data) {
+          _postTransitionCallbacks = [];
           await initContainer(data?.next?.container || document, {
             isFirstLoad: false,
             isNavigation: true,
-            namespace: getNamespace(data, "next")
+            namespace: getNamespace(data, "next"),
+            onPostTransition: (fn) => _postTransitionCallbacks.push(fn)
           });
         }
       },
@@ -177,10 +214,18 @@ export function initBarba({ initContainer }) {
           const gsap = window.gsap;
           if (!gsap) return;
 
+          // Reset IX2-managed CSS custom properties before the animation starts.
+          // "While scrolling in view" interactions tween --* vars on :root/body;
+          // without this the new container flashes the old scroll state.
+          resetIX2CSSVars();
+
+          _postTransitionCallbacks = [];
+
           const initPromise = initContainer(data?.next?.container || document, {
             isFirstLoad: false,
             isNavigation: true,
-            namespace: getNamespace(data, "next")
+            namespace: getNamespace(data, "next"),
+            onPostTransition: (fn) => _postTransitionCallbacks.push(fn)
           });
 
           const tl = gsap.timeline().from(data.next.container, {

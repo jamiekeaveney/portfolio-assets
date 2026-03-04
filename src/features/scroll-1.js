@@ -2,7 +2,7 @@
 import { addCleanup } from "../core/cleanup.js";
 import { createST } from "../core/scrolltrigger.js";
 
-export function initScroll1(container) {
+export function initScroll1(container, ctx) {
   if (!container) return;
   if (!window.gsap || !window.ScrollTrigger) return;
 
@@ -28,17 +28,31 @@ export function initScroll1(container) {
       }
     }
 
+    // Always set item 0 active immediately so the UI looks correct during
+    // the enter animation, regardless of whether ST creation is deferred.
     makeActive(0);
 
-    for (let i = 0; i < triggers.length; i++) {
-      createST({
-        trigger: triggers[i],
-        start: "top center",
-        end: "bottom center",
-        onToggle: (self) => {
-          if (self.isActive) makeActive(i);
-        },
-      });
+    function createTriggers() {
+      for (let i = 0; i < triggers.length; i++) {
+        createST({
+          trigger: triggers[i],
+          start: "top center",
+          end: "bottom center",
+          onToggle: (self) => {
+            if (self.isActive) makeActive(i);
+          },
+        });
+      }
+    }
+
+    if (ctx && typeof ctx.onPostTransition === "function") {
+      // Defer ST creation until after the transition completes and IX2 has
+      // settled the layout. Creating STs during the 1.5s enter animation
+      // gives wrong trigger positions — onToggle never fires past item 0.
+      ctx.onPostTransition(createTriggers);
+    } else {
+      // First load (once()) path — layout is already settled, create immediately.
+      createTriggers();
     }
 
     // view-level cleanup

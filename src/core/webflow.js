@@ -8,11 +8,13 @@ export function syncWebflowPageIdFromNextHtml(nextHtml) {
   } catch (_) {}
 }
 
-/** Restore Webflow's .w--current on nav links (Barba breaks the native behaviour). */
-export function resetWCurrent() {
+/** Restore Webflow's .w--current on nav links (Barba breaks the native behaviour).
+ *  @param {string} [overridePath] - Use this path instead of window.location.pathname
+ *    (pass data.next.url.path from a before() hook for immediate update). */
+export function resetWCurrent(overridePath) {
   document.querySelectorAll(".w--current").forEach((el) => el.classList.remove("w--current"));
 
-  const path = window.location.pathname.replace(/\/$/, "");
+  const path = (overridePath || window.location.pathname).replace(/\/$/, "");
   document.querySelectorAll("a[href]").forEach((a) => {
     try {
       const url = new URL(a.getAttribute("href"), window.location.origin);

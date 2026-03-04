@@ -17,7 +17,7 @@ export async function initHome(container, ctx) {
     if (homeStarted) return;
     homeStarted = true;
 
-    initScroll1(container);
+    initScroll1(container, ctx);
     initLenisCentre(container);
 
     if (ctx && typeof ctx.startLoadReveals === "function") {
