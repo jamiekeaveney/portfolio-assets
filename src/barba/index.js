@@ -61,22 +61,29 @@ export function initBarba({ initContainer }) {
   window.barba.hooks.after((data) => {
     syncWebflowPageIdFromNextHtml(data?.next?.html || "");
 
-    // 1. Remove all transition inline styles first so layout is clean.
+    // 1. Remove all transition inline styles so layout is clean.
     window.gsap?.set(data?.next?.container, {
       clearProps:
         "position,top,left,right,bottom,width,height,overflow,zIndex,opacity,transform,backgroundColor"
     });
 
-    // 2. Refresh ScrollTrigger NOW — after clearProps, so every trigger
-    //    measures positions against the final, untransformed layout.
-    //    This is the only correct moment: the enter animation has finished
-    //    and all inline styles from the transition are gone.
+    // 2. Reinit IX2 BEFORE refreshing ScrollTrigger.
+    //    ix2.init() sets initial element states (CSS variables, opacity, etc.)
+    //    Some of those initial states affect layout height (e.g. hero sections,
+    //    footer reveal). We must measure ST trigger positions AFTER IX2 has
+    //    applied its initial DOM state, otherwise scroll-1 positions are stale
+    //    and onToggle never fires past item 0.
+    reinitWebflowIX2();
+
+    // 3. Refresh ScrollTrigger AFTER IX2 has set its initial states, so every
+    //    trigger is measured against the final settled layout.
     safeRefreshScrollTrigger();
 
-    // 3. Reinit IX2 last — it reads scroll=0 and element positions to set
-    //    initial animation states, so it must run after the layout is clean
-    //    and ST has already recalculated.
-    reinitWebflowIX2();
+    // 4. Tell Lenis the page height may have changed after IX2 init.
+    //    IX2 "Footer Reveal" and similar interactions change the effective
+    //    scroll extent. Without this, Lenis's cached max-scroll is stale and
+    //    snaps/bounces at the scroll boundary.
+    try { window.lenis?.resize?.(); } catch (_) {}
 
     resetWCurrent();
     clearFromPanel();
@@ -192,9 +199,10 @@ export function initBarba({ initContainer }) {
             isNavigation: false,
             namespace: getNamespace(data, "next")
           });
-          // The global after() hook does not fire for once(), so we
-          // refresh here — no animation is running, layout is final.
+          // The global after() hook does not fire for once(), so mirror
+          // the same sequence: ST refresh then lenis resize.
           safeRefreshScrollTrigger();
+          try { window.lenis?.resize?.(); } catch (_) {}
         },
 
         after() {}
