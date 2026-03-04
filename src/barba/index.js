@@ -1,5 +1,5 @@
 import { runCleanups } from "../core/cleanup.js";
-import { stopLenis, destroyLenis } from "../core/lenis.js";
+import { stopLenis, destroyLenis, createLenis, startLenis } from "../core/lenis.js";
 import { killAllScrollTriggers, safeRefreshScrollTrigger } from "../core/scrolltrigger.js";
 import {
   syncWebflowPageIdFromNextHtml,
@@ -8,6 +8,7 @@ import {
 } from "../core/webflow.js";
 import { closeNav, isFromPanel, clearFromPanel } from "../core/nav.js";
 import { destroyPage } from "../pages/index.js";
+import { snapshotIX2CSSVars } from "./freeze.js";
 
 const VT_DURATION = 1.5;
 const VT_EASE = "cubic-bezier(0.25, 0.1, 0.25, 1)";
@@ -55,6 +56,14 @@ export function initBarba({ initContainer }) {
     if (!el) return false;
     if (el.hasAttribute?.("data-barba-prevent")) return true;
 
+    // Scroll-to-next-project sets this flag before doing location.href navigation.
+    // Barba doesn't intercept location.href, but if a visible <a> link triggers
+    // this path, the flag ensures Barba stays out of the way.
+    if (window._bypassBarba) {
+      window._bypassBarba = false;
+      return true;
+    }
+
     const href = el.getAttribute?.("href");
     if (!href) return false;
 
@@ -84,30 +93,24 @@ export function initBarba({ initContainer }) {
   window.barba.hooks.after(() => setCursorBusy(false));
 
   window.barba.hooks.after((data) => {
-    syncWebflowPageIdFromNextHtml(data?.next?.html || "");
-
     // 1. Remove all transition inline styles so layout is clean.
     window.gsap?.set(data?.next?.container, {
       clearProps:
         "position,top,left,right,bottom,width,height,overflow,zIndex,opacity,transform,backgroundColor"
     });
 
-    // 2. Reinit IX2 BEFORE refreshing ScrollTrigger.
-    //    ix2.init() sets initial element states (CSS variables, opacity, etc.)
-    //    Some of those initial states affect layout height (e.g. hero sections,
-    //    footer reveal). We must measure ST trigger positions AFTER IX2 has
-    //    applied its initial DOM state, otherwise scroll-1 positions are stale
-    //    and onToggle never fires past item 0.
+    // 2. Reinit IX2 a second time now that layout is clean (clearProps has run).
+    //    The first IX2 init happens in enter() for immediate scroll responsiveness.
+    //    This second init ensures "on page load" interactions and ScrollTrigger
+    //    positions are correct against the final settled layout.
     reinitWebflowIX2();
 
-    // 3. Refresh ScrollTrigger AFTER IX2 has set its initial states, so every
-    //    trigger is measured against the final settled layout.
+    // 3. Refresh ScrollTrigger AFTER IX2 has set its initial states.
     safeRefreshScrollTrigger();
 
     // 4. Tell Lenis the page height may have changed after IX2 init.
     //    IX2 "Footer Reveal" and similar interactions change the effective
-    //    scroll extent. Without this, Lenis's cached max-scroll is stale and
-    //    snaps/bounces at the scroll boundary.
+    //    scroll extent. Without this, Lenis's cached max-scroll is stale.
     try { window.lenis?.resize?.(); } catch (_) {}
 
     // 5. Run deferred post-transition callbacks (e.g. scroll-1 ST creation).
@@ -163,10 +166,20 @@ export function initBarba({ initContainer }) {
 
         leave(data) {
           closeNav();
+
+          // Snapshot outgoing CSS vars BEFORE killAllScrollTriggers() reverts GSAP
+          // scrub tweens to their initial state (0). After killing, re-apply the
+          // snapshot so the outgoing container holds its visual state while animating out.
+          const restoreOutgoingVars = snapshotIX2CSSVars();
+
           stopLenis();
           runCleanups();
           destroyLenis();
           killAllScrollTriggers();
+
+          // Re-apply frozen values now that GSAP has reverted them to 0.
+          restoreOutgoingVars();
+
           destroyPage(getNamespace(data, "current"));
 
           const gsap = window.gsap;
@@ -197,9 +210,6 @@ export function initBarba({ initContainer }) {
 
           resetScrollTop();
 
-          // Transform origin at viewport top = scrollY px from
-          // the container's top edge. This keeps the scale anchored
-          // to what the user was actually seeing, not the document top.
           return gsap.timeline().to(data.current.container, {
             y: "-25vh",
             scale: 0.95,
@@ -214,10 +224,28 @@ export function initBarba({ initContainer }) {
           const gsap = window.gsap;
           if (!gsap) return;
 
-          // Reset IX2-managed CSS custom properties before the animation starts.
-          // "While scrolling in view" interactions tween --* vars on :root/body;
-          // without this the new container flashes the old scroll state.
+          // Clear stale IX2 vars from the outgoing page before the new page
+          // becomes visible. Prevents flashing the old scroll-driven state.
           resetIX2CSSVars();
+
+          // Sync page ID here (not only in after()) so IX2 targets the correct
+          // page's elements when we init it early below.
+          syncWebflowPageIdFromNextHtml(data?.next?.html || "");
+
+          // Create Lenis before IX2 so scroll events flow through ST.update()
+          // from the moment the first IX2 ScrollTriggers are created.
+          // createLenis() is idempotent — skips if already alive.
+          createLenis();
+
+          // Init IX2 NOW so "while scrolling in view" interactions respond
+          // to scroll DURING the transition, not only after it completes.
+          // Positions may be slightly off (container is mid-animation) — they
+          // are corrected by the second reinitWebflowIX2() call in after().
+          reinitWebflowIX2();
+          safeRefreshScrollTrigger();
+
+          // Start Lenis so the GSAP ticker begins driving scroll → ST.update().
+          startLenis();
 
           _postTransitionCallbacks = [];
 

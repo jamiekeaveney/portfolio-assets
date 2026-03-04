@@ -5,6 +5,7 @@ let _lenisScrollUpdateFn = null;
 
 export function createLenis() {
   if (!window.Lenis) return null;
+  if (window.lenis) return window.lenis; // already alive — skip re-create
 
   destroyLenis();
 

@@ -2,12 +2,14 @@ import { initHome, destroyHome } from "./home.js";
 import { initAbout, destroyAbout } from "./about.js";
 import { initApproach, destroyApproach } from "./approach.js";
 import { initWork, destroyWork } from "./work.js";
+import { initProject, destroyProject } from "./project.js";
 
 const pages = {
   home: { init: initHome, destroy: destroyHome },
   about: { init: initAbout, destroy: destroyAbout },
   approach: { init: initApproach, destroy: destroyApproach },
-  work: { init: initWork, destroy: destroyWork }
+  work: { init: initWork, destroy: destroyWork },
+  project: { init: initProject, destroy: destroyProject }
 };
 
 export function initPage(namespace, container, ctx) {
