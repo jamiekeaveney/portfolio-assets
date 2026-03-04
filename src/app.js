@@ -1,6 +1,5 @@
 import { onReady } from "./core/ready.js";
 import { runCleanups } from "./core/cleanup.js";
-import { safeRefreshScrollTrigger } from "./core/scrolltrigger.js";
 import { createLenis, startLenis } from "./core/lenis.js";
 import { initNav } from "./core/nav.js";
 
@@ -50,7 +49,12 @@ export async function initContainer(container, ctx = {}) {
   initTextScroll(container);
   initRevealScroll(container);
 
-  safeRefreshScrollTrigger();
+  // NOTE: ScrollTrigger.refresh() is intentionally NOT called here.
+  // For navigations it fires in the global barba after() hook, after
+  // clearProps removes all transition inline styles (so positions are
+  // calculated against clean layout). For first load (once()) it fires
+  // directly in the once() hook. Calling it here during the enter
+  // animation would measure positions against a mid-animation transform.
   startLenis();
 }
 

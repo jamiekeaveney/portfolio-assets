@@ -1,6 +1,6 @@
 import { runCleanups } from "../core/cleanup.js";
 import { stopLenis, destroyLenis } from "../core/lenis.js";
-import { killAllScrollTriggers } from "../core/scrolltrigger.js";
+import { killAllScrollTriggers, safeRefreshScrollTrigger } from "../core/scrolltrigger.js";
 import {
   syncWebflowPageIdFromNextHtml,
   reinitWebflowIX2,
@@ -60,14 +60,26 @@ export function initBarba({ initContainer }) {
 
   window.barba.hooks.after((data) => {
     syncWebflowPageIdFromNextHtml(data?.next?.html || "");
-    reinitWebflowIX2();
-    resetWCurrent();
-    clearFromPanel();
 
+    // 1. Remove all transition inline styles first so layout is clean.
     window.gsap?.set(data?.next?.container, {
       clearProps:
         "position,top,left,right,bottom,width,height,overflow,zIndex,opacity,transform,backgroundColor"
     });
+
+    // 2. Refresh ScrollTrigger NOW — after clearProps, so every trigger
+    //    measures positions against the final, untransformed layout.
+    //    This is the only correct moment: the enter animation has finished
+    //    and all inline styles from the transition are gone.
+    safeRefreshScrollTrigger();
+
+    // 3. Reinit IX2 last — it reads scroll=0 and element positions to set
+    //    initial animation states, so it must run after the layout is clean
+    //    and ST has already recalculated.
+    reinitWebflowIX2();
+
+    resetWCurrent();
+    clearFromPanel();
   });
 
   window.barba.init({
@@ -118,8 +130,20 @@ export function initBarba({ initContainer }) {
 
           const scrollY = window.scrollY || window.pageYOffset || 0;
 
-          // Make container AND all direct children transparent
-          // so background from body/html shows through
+          // Sync body/html background to the next page's colour before
+          // the animation starts. This ensures the "peek through" colour
+          // revealed as the current container shrinks is always correct,
+          // regardless of which page you started the session on.
+          const nextContainer = data.next.container;
+          if (nextContainer) {
+            const nextBg = window.getComputedStyle(nextContainer).backgroundColor;
+            if (nextBg && nextBg !== "rgba(0, 0, 0, 0)" && nextBg !== "transparent") {
+              document.documentElement.style.backgroundColor = nextBg;
+              document.body.style.backgroundColor = nextBg;
+            }
+          }
+
+          // Make container transparent so body background shows through.
           gsap.set(data.current.container, {
             position: "fixed",
             top: -scrollY,
@@ -131,10 +155,12 @@ export function initBarba({ initContainer }) {
             backgroundColor: "transparent"
           });
 
-          // Kill background on direct children (page-wrapper etc.)
-          const kids = data.current.container.children;
-          for (let i = 0; i < kids.length; i++) {
-            kids[i].style.backgroundColor = "transparent";
+          // Clear backgrounds on all descendants, not just direct children.
+          // Webflow nests backgrounds on sections inside .page-wrapper, so
+          // only clearing direct children leaves inner sections visible.
+          const descendants = data.current.container.querySelectorAll("*");
+          for (let i = 0; i < descendants.length; i++) {
+            descendants[i].style.backgroundColor = "transparent";
           }
 
           gsap.set(data.next.container, { zIndex: 2 });
@@ -180,6 +206,9 @@ export function initBarba({ initContainer }) {
             isNavigation: false,
             namespace: getNamespace(data, "next")
           });
+          // The global after() hook does not fire for once(), so we
+          // refresh here — no animation is running, layout is final.
+          safeRefreshScrollTrigger();
         },
 
         after() {}
