@@ -20,14 +20,12 @@ const setCursorBusy = (on) =>
 
 const resetScrollTop = () => window.scrollTo(0, 0);
 
-// Queue for callbacks that must run after the transition + IX2 init + ST refresh.
-// Features like scroll-1 register here so their STs are created against a settled layout.
+// Queue for callbacks deferred to after the transition + IX2 + ST.refresh cycle.
 let _postTransitionCallbacks = [];
 
-// Strip any CSS custom properties (--*) set as inline styles on :root and body.
-// IX2 "while scrolling in view" interactions tween CSS vars (e.g. --scroll-progress)
-// on these elements. They persist across Barba navigations, causing the new container
-// to flash the old scroll-driven state at the start of the enter animation.
+// Strip --* CSS custom properties set by GSAP/IX2 as inline styles on :root and body.
+// Called at the START of enter() to give the incoming page a clean slate, safe to do
+// because frozen outgoing vars are now on the outgoing CONTAINER (not :root/body).
 function resetIX2CSSVars() {
   [document.documentElement, document.body].forEach((el) => {
     try {
@@ -57,8 +55,7 @@ export function initBarba({ initContainer }) {
     if (el.hasAttribute?.("data-barba-prevent")) return true;
 
     // Scroll-to-next-project sets this flag before doing location.href navigation.
-    // Barba doesn't intercept location.href, but if a visible <a> link triggers
-    // this path, the flag ensures Barba stays out of the way.
+    // location.href already bypasses Barba, but this handles any <a>-based trigger.
     if (window._bypassBarba) {
       window._bypassBarba = false;
       return true;
@@ -84,7 +81,6 @@ export function initBarba({ initContainer }) {
     history.scrollRestoration = "manual";
   } catch (_) {}
 
-  // Update nav state immediately at click — don't wait for transition to finish.
   window.barba.hooks.before((data) => {
     setCursorBusy(true);
     resetWCurrent(data?.next?.url?.path);
@@ -99,27 +95,31 @@ export function initBarba({ initContainer }) {
         "position,top,left,right,bottom,width,height,overflow,zIndex,opacity,transform,backgroundColor"
     });
 
-    // 2. Reinit IX2 a second time now that layout is clean (clearProps has run).
-    //    The first IX2 init happens in enter() for immediate scroll responsiveness.
-    //    This second init ensures "on page load" interactions and ScrollTrigger
-    //    positions are correct against the final settled layout.
+    // 2. Reinit IX2 with correct layout (clearProps has run, animation is done).
+    //    First IX2 init was in enter() for immediate scroll responsiveness during
+    //    transition. This second init fixes positions against the settled layout.
     reinitWebflowIX2();
 
-    // 3. Refresh ScrollTrigger AFTER IX2 has set its initial states.
+    // 3. Refresh ScrollTrigger — all positions are now final.
     safeRefreshScrollTrigger();
 
-    // 4. Tell Lenis the page height may have changed after IX2 init.
-    //    IX2 "Footer Reveal" and similar interactions change the effective
-    //    scroll extent. Without this, Lenis's cached max-scroll is stale.
+    // 4. Resize Lenis to pick up the new page height after IX2 init.
     try { window.lenis?.resize?.(); } catch (_) {}
 
-    // 5. Run deferred post-transition callbacks (e.g. scroll-1 ST creation).
-    //    These need to fire AFTER IX2 has settled the layout AND after the
-    //    animation inline styles are gone — exactly here.
+    // 5. Flush any Lenis lerp that accumulated during the transition.
+    //    clearProps + IX2 reinit changes layout. If Lenis was mid-lerp, its
+    //    virtual target no longer matches reality. Snapping to window.scrollY
+    //    clears the pending lerp and prevents the post-transition recalibration jolt.
+    try {
+      if (window.lenis) {
+        window.lenis.scrollTo(window.scrollY, { immediate: true });
+      }
+    } catch (_) {}
+
+    // 6. Run deferred post-transition callbacks (e.g. scroll-1 ST creation).
     if (_postTransitionCallbacks.length) {
       _postTransitionCallbacks.forEach((fn) => { try { fn(); } catch (_) {} });
       _postTransitionCallbacks = [];
-      // One final refresh to pick up any STs created by the callbacks.
       safeRefreshScrollTrigger();
     }
 
@@ -167,17 +167,18 @@ export function initBarba({ initContainer }) {
         leave(data) {
           closeNav();
 
-          // Snapshot outgoing CSS vars BEFORE killAllScrollTriggers() reverts GSAP
-          // scrub tweens to their initial state (0). After killing, re-apply the
-          // snapshot so the outgoing container holds its visual state while animating out.
-          const restoreOutgoingVars = snapshotIX2CSSVars();
+          // Snapshot outgoing CSS vars and freeze them onto the outgoing CONTAINER
+          // (not :root/body). CSS cascade means children inherit from the container,
+          // so this preserves the visual state while leaving :root/body free to be
+          // cleared by resetIX2CSSVars() in enter() without conflict.
+          const restoreOutgoingVars = snapshotIX2CSSVars(data.current.container);
 
           stopLenis();
           runCleanups();
           destroyLenis();
           killAllScrollTriggers();
 
-          // Re-apply frozen values now that GSAP has reverted them to 0.
+          // Re-apply frozen values onto the container after GSAP has reverted :root/body.
           restoreOutgoingVars();
 
           destroyPage(getNamespace(data, "current"));
@@ -187,8 +188,6 @@ export function initBarba({ initContainer }) {
 
           const scrollY = window.scrollY || window.pageYOffset || 0;
 
-          // Make container AND all direct children transparent
-          // so background from body/html shows through.
           gsap.set(data.current.container, {
             position: "fixed",
             top: -scrollY,
@@ -200,7 +199,6 @@ export function initBarba({ initContainer }) {
             backgroundColor: "transparent"
           });
 
-          // Kill background on direct children (page-wrapper etc.)
           const kids = data.current.container.children;
           for (let i = 0; i < kids.length; i++) {
             kids[i].style.backgroundColor = "transparent";
@@ -224,27 +222,28 @@ export function initBarba({ initContainer }) {
           const gsap = window.gsap;
           if (!gsap) return;
 
-          // Clear stale IX2 vars from the outgoing page before the new page
-          // becomes visible. Prevents flashing the old scroll-driven state.
+          // Clear stale :root/body IX2 vars from the outgoing page. Safe to do here
+          // because the frozen outgoing vars are now on the outgoing container element.
           resetIX2CSSVars();
 
-          // Sync page ID here (not only in after()) so IX2 targets the correct
-          // page's elements when we init it early below.
+          // Sync page ID before IX2 so it targets the correct page's elements.
           syncWebflowPageIdFromNextHtml(data?.next?.html || "");
 
-          // Create Lenis before IX2 so scroll events flow through ST.update()
-          // from the moment the first IX2 ScrollTriggers are created.
-          // createLenis() is idempotent — skips if already alive.
+          // Create Lenis before IX2 so the scroll → ST.update() connection exists
+          // the moment the first IX2 ScrollTriggers are created.
           createLenis();
 
-          // Init IX2 NOW so "while scrolling in view" interactions respond
-          // to scroll DURING the transition, not only after it completes.
-          // Positions may be slightly off (container is mid-animation) — they
-          // are corrected by the second reinitWebflowIX2() call in after().
+          // Init IX2 early — "while scrolling in view" STs are live immediately,
+          // so scroll responds DURING the transition animation, not only after.
+          // Positions may be slightly off (animation in progress); corrected in after().
           reinitWebflowIX2();
-          safeRefreshScrollTrigger();
 
-          // Start Lenis so the GSAP ticker begins driving scroll → ST.update().
+          // Single synchronous refresh only — no delayed calls.
+          // safeRefreshScrollTrigger() fires at 0/16/200ms; the 200ms call would hit
+          // during the animation and corrupt mid-flight positions. Use one sync call here.
+          try { window.ScrollTrigger?.refresh(); } catch (_) {}
+
+          // Start Lenis — scroll now drives IX2 vars in real time during the transition.
           startLenis();
 
           _postTransitionCallbacks = [];
@@ -272,8 +271,6 @@ export function initBarba({ initContainer }) {
             isNavigation: false,
             namespace: getNamespace(data, "next")
           });
-          // The global after() hook does not fire for once(), so mirror
-          // the same sequence: ST refresh then lenis resize.
           safeRefreshScrollTrigger();
           try { window.lenis?.resize?.(); } catch (_) {}
         },
