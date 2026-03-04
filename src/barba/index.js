@@ -130,20 +130,8 @@ export function initBarba({ initContainer }) {
 
           const scrollY = window.scrollY || window.pageYOffset || 0;
 
-          // Sync body/html background to the next page's colour before
-          // the animation starts. This ensures the "peek through" colour
-          // revealed as the current container shrinks is always correct,
-          // regardless of which page you started the session on.
-          const nextContainer = data.next.container;
-          if (nextContainer) {
-            const nextBg = window.getComputedStyle(nextContainer).backgroundColor;
-            if (nextBg && nextBg !== "rgba(0, 0, 0, 0)" && nextBg !== "transparent") {
-              document.documentElement.style.backgroundColor = nextBg;
-              document.body.style.backgroundColor = nextBg;
-            }
-          }
-
-          // Make container transparent so body background shows through.
+          // Make container AND all direct children transparent
+          // so background from body/html shows through.
           gsap.set(data.current.container, {
             position: "fixed",
             top: -scrollY,
@@ -155,12 +143,10 @@ export function initBarba({ initContainer }) {
             backgroundColor: "transparent"
           });
 
-          // Clear backgrounds on all descendants, not just direct children.
-          // Webflow nests backgrounds on sections inside .page-wrapper, so
-          // only clearing direct children leaves inner sections visible.
-          const descendants = data.current.container.querySelectorAll("*");
-          for (let i = 0; i < descendants.length; i++) {
-            descendants[i].style.backgroundColor = "transparent";
+          // Kill background on direct children (page-wrapper etc.)
+          const kids = data.current.container.children;
+          for (let i = 0; i < kids.length; i++) {
+            kids[i].style.backgroundColor = "transparent";
           }
 
           gsap.set(data.next.container, { zIndex: 2 });
