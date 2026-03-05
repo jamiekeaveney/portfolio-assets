@@ -30,7 +30,6 @@ export async function initContainer(container, ctx = {}) {
   // runs — this call is a no-op in that case (Lenis already started).
   startLenis();
   initSplit(container);
-  initVideoAuto(container);
   initVarsGrouped(container, ctx);
   primeRevealLoad(container, ctx);
   primeVarsLoad(container, ctx, "load");
@@ -48,17 +47,20 @@ export async function initContainer(container, ctx = {}) {
 
   await initPage(ctx.namespace || "", container, ctx);
 
+  // initVideoAuto runs AFTER initPage so that slider.js clones are in the DOM.
+  // The _initialized guard makes this safe — already-init'd originals are skipped,
+  // only the newly cloned slides (which have no _initialized flag) are bound.
+  initVideoAuto(container);
+
   startLoadReveals();
 
   initTextScroll(container);
   initRevealScroll(container);
 
-  // NOTE: ScrollTrigger.refresh() is intentionally NOT called here.
-  // For navigations it fires in the global barba after() hook, after
-  // clearProps removes all transition inline styles (so positions are
-  // calculated against clean layout). For first load (once()) it fires
-  // directly in the once() hook. Calling it here during the enter
-  // animation would measure positions against a mid-animation transform.
+  // ST.refresh() and lenis.resize() are NOT called here.
+  // For navigations: called once in barba enter() before the animation,
+  // while scroll=0 and the container is untransformed — the only safe moment.
+  // For first load (once()): called synchronously in the once() hook.
   startLenis();
 }
 

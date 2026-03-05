@@ -2,7 +2,7 @@
 import { addCleanup } from "../core/cleanup.js";
 import { createST } from "../core/scrolltrigger.js";
 
-export function initScroll1(container, ctx) {
+export function initScroll1(container) {
   if (!container) return;
   if (!window.gsap || !window.ScrollTrigger) return;
 
@@ -28,34 +28,26 @@ export function initScroll1(container, ctx) {
       }
     }
 
-    // Always set item 0 active immediately so the UI looks correct during
-    // the enter animation, regardless of whether ST creation is deferred.
+    // Set item 0 active immediately so the UI looks correct from the first frame.
     makeActive(0);
 
-    function createTriggers() {
-      for (let i = 0; i < triggers.length; i++) {
-        createST({
-          trigger: triggers[i],
-          start: "top center",
-          end: "bottom center",
-          onToggle: (self) => {
-            if (self.isActive) makeActive(i);
-          },
-        });
-      }
+    // Create scroll triggers immediately — the container is untransformed at
+    // scroll=0 when initScroll1 runs, so all positions are correct.
+    // The previous onPostTransition deferral was required when the container had
+    // a CSS transform applied during the enter animation (giving wrong trigger
+    // positions). The fixed-wrapper animation strategy keeps the container
+    // untransformed, so immediate creation is safe on both first load and navigation.
+    for (let i = 0; i < triggers.length; i++) {
+      createST({
+        trigger: triggers[i],
+        start: "top center",
+        end: "bottom center",
+        onToggle: (self) => {
+          if (self.isActive) makeActive(i);
+        },
+      });
     }
 
-    if (ctx && typeof ctx.onPostTransition === "function") {
-      // Defer ST creation until after the transition completes and IX2 has
-      // settled the layout. Creating STs during the 1.5s enter animation
-      // gives wrong trigger positions — onToggle never fires past item 0.
-      ctx.onPostTransition(createTriggers);
-    } else {
-      // First load (once()) path — layout is already settled, create immediately.
-      createTriggers();
-    }
-
-    // view-level cleanup
     addCleanup(() => {
       try { component.removeAttribute("data-scroll-1"); } catch (_) {}
     });
