@@ -6,9 +6,8 @@
 //     data-barba="container"
 //     data-barba-namespace="project"
 //
-// Both scripts are wrapped in gsap.matchMedia() so GSAP's matchMedia context
-// handles cleanup automatically via mm.revert(), which is called by addCleanup().
-// This means cleanup fires correctly on both Barba navigation and breakpoint changes.
+// Both scripts use gsap.matchMedia() so cleanup fires correctly on Barba
+// navigation (via addCleanup → mm.revert()) and on breakpoint changes.
 
 import { addCleanup } from "../core/cleanup.js";
 
@@ -81,11 +80,16 @@ function initCmsNext(container) {
 
 // ─── Scroll-to-next-project ──────────────────────────────────────────────────
 // Pins the footer section and scrubs a progress counter as the user scrolls.
-// When the user scrolls to 100%, navigates to the next project via location.href
-// (bypasses Barba — this navigation is intentionally seamless/native, not a
-// Barba page transition).
+// When progress reaches 100%, navigates to the next project via location.href,
+// which bypasses Barba entirely (intentional — this is a seamless native nav).
+//
+// CRITICAL: the pinned ScrollTrigger MUST be created AFTER clearProps removes
+// the Barba enter animation transform from the container. A CSS transform on any
+// ancestor prevents ScrollTrigger from calculating pin spacer height correctly,
+// resulting in zero scroll distance. We enforce this via ctx.onPostTransition,
+// which runs in barba's after() hook, after clearProps.
 
-function initScrollToNext(container) {
+function initScrollToNext(container, ctx) {
   if (!window.gsap || !window.ScrollTrigger) return;
 
   window.gsap.registerPlugin(window.ScrollTrigger);
@@ -99,27 +103,14 @@ function initScrollToNext(container) {
 
     const counters = container.querySelectorAll(".counter");
 
-    let tween, href;
+    let tween;
     let ended = false, started = false, lastTxt = "";
 
-    // Wait for initCmsNext to reduce the CMS list to a single item,
-    // then read the href for the next project from that item.
-    const waitOne = (cb, tries = 200) => {
-      const comp = container.querySelector("[tr-cmsnext-element='component']");
-      if (!comp) {
-        if (tries > 0) requestAnimationFrame(() => waitOne(cb, tries - 1));
-        return;
-      }
-      const items = comp.querySelectorAll(".w-dyn-item");
-      if (items.length === 1) {
-        cb(items[0]);
-        return;
-      }
-      if (tries > 0) requestAnimationFrame(() => waitOne(cb, tries - 1));
-    };
-
-    waitOne((item) => {
-      href = item.querySelector("a[href]")?.href;
+    // Creates the pinned ScrollTrigger. Must run on a settled layout (no
+    // ancestor transforms). Called either via onPostTransition (navigation)
+    // or via waitOne rAF (first load — no enter animation transform active).
+    const createPinTrigger = (item) => {
+      const href = item.querySelector("a[href]")?.href;
       if (!href) return;
 
       const H = () => window.innerHeight;
@@ -159,9 +150,8 @@ function initScrollToNext(container) {
               pinned.classList.add("end-transition");
               window.lenis?.stop?.();
               root.style.overflow = "hidden";
-              // Use location.href directly — this is a hard/native navigation that
-              // bypasses Barba entirely. The _bypassBarba flag is set as a safety net
-              // in case a visible <a> link ever replaces this programmatic navigation.
+              // location.href bypasses Barba (not a link click). _bypassBarba
+              // is a safety net in case this ever switches to an <a>-based trigger.
               setTimeout(() => {
                 window._bypassBarba = true;
                 location.href = href;
@@ -170,7 +160,39 @@ function initScrollToNext(container) {
           }
         }
       });
-    });
+
+      // Explicitly refresh after creating the pin ST so the pin spacer
+      // (which adds scroll height) is included in Lenis's scroll extent.
+      try { window.ScrollTrigger?.refresh(); } catch (_) {}
+      try { window.lenis?.resize?.(); } catch (_) {}
+    };
+
+    if (ctx && typeof ctx.onPostTransition === "function") {
+      // Navigation path: defer pin ST creation until after() hook removes the
+      // container's enter-animation transform via clearProps. By this point
+      // initCmsNext has already reduced the list to one item synchronously,
+      // so we can read it directly without polling.
+      ctx.onPostTransition(() => {
+        const comp = container.querySelector("[tr-cmsnext-element='component']");
+        const item = comp?.querySelector(".w-dyn-item");
+        if (item) createPinTrigger(item);
+      });
+    } else {
+      // First load path: no enter-animation transform active.
+      // Poll for initCmsNext to finish reducing the list (it runs synchronously
+      // but the rAF ensures a DOM repaint before we measure).
+      const waitOne = (tries = 200) => {
+        const comp = container.querySelector("[tr-cmsnext-element='component']");
+        if (!comp) {
+          if (tries > 0) requestAnimationFrame(() => waitOne(tries - 1));
+          return;
+        }
+        const items = comp.querySelectorAll(".w-dyn-item");
+        if (items.length === 1) { createPinTrigger(items[0]); return; }
+        if (tries > 0) requestAnimationFrame(() => waitOne(tries - 1));
+      };
+      waitOne();
+    }
 
     return () => {
       ended = false;
@@ -191,14 +213,13 @@ function initScrollToNext(container) {
 
 // ─── Public exports ──────────────────────────────────────────────────────────
 
-export function initProject(container) {
+export function initProject(container, ctx) {
   if (!container) return;
   initCmsNext(container);
-  initScrollToNext(container);
+  initScrollToNext(container, ctx);
 }
 
 export function destroyProject() {
-  // Cleanup is handled by addCleanup() registered inside initCmsNext/initScrollToNext.
-  // addCleanup callbacks are drained by runCleanups() in leave() before this is called,
-  // so this is intentionally empty.
+  // Cleanup registered via addCleanup() inside initCmsNext/initScrollToNext.
+  // Those callbacks are drained by runCleanups() in leave() before this is called.
 }

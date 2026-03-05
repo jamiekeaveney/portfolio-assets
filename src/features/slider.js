@@ -227,13 +227,12 @@ export function initSlider(container) {
 
     track.onclick = null;
 
-    // Restore original DOM — remove all clones, re-insert originals
-    while (track.firstChild) track.removeChild(track.firstChild);
-    origSlides.forEach((slide) => track.appendChild(slide));
-
-    // Clear inline styles written during the loop
-    track.style.transform = "";
-    track.style.willChange = "";
+    // Intentionally do NOT restore the original DOM here.
+    // Barba replaces the entire container on navigation, so removing clones
+    // and re-inserting origSlides is unnecessary — and is exactly what causes
+    // the slider to visually "die" (snap to N slides) during the leave animation.
+    // The track.style.transform remains set, keeping the slider frozen in place
+    // through the leave animation. Barba removes the container when done.
 
     slider.removeAttribute("data-slider-ran");
   });
