@@ -1,5 +1,4 @@
 import { runCleanups, captureCleanups } from "../core/cleanup.js";
-import { stopLenis, destroyLenis, createLenis, startLenis } from "../core/lenis.js";
 import { killAllScrollTriggers } from "../core/scrolltrigger.js";
 import {
   syncWebflowPageIdFromNextHtml,
@@ -115,9 +114,8 @@ export function initBarba({ initContainer }) {
 
         leave(data) {
           closeNav();
-          stopLenis();
+          try { window.lenis?.scrollTo(0, { immediate: true }); } catch (_) {}
           runCleanups();
-          destroyLenis();
           killAllScrollTriggers();
           destroyPage(getNamespace(data, "current"));
           try { data.current.container.remove(); } catch (_) {}
@@ -167,12 +165,10 @@ export function initBarba({ initContainer }) {
           // the now-empty queue and belong to the incoming page.
           const runOutgoingCleanup = captureCleanups();
 
-          // ── Step 4: Tear down only the scroll systems ─────────────────────
-          // Lenis and ScrollTriggers must be destroyed NOW so enter() can
-          // create fresh ones (createLenis is idempotent, but STs need a clean slate).
-          stopLenis();
-          destroyLenis();
-          killAllScrollTriggers(); // GSAP reverts scrub tweens to 0 here
+          // ── Step 4: Kill ScrollTriggers for the outgoing page ─────────────
+          // Lenis stays alive (single global instance). Only STs need a clean
+          // slate — GSAP reverts scrub tweens to 0 here.
+          killAllScrollTriggers();
 
           // ── Step 5: Re-apply frozen CSS vars ──────────────────────────────
           // GSAP's kill reverted :root/body vars to 0 in step 4.
@@ -215,7 +211,8 @@ export function initBarba({ initContainer }) {
 
           // Reset scroll AFTER fixing container — container is fixed so its
           // absolute-positioned sticky children won't shift.
-          resetScrollTop();
+          // Use Lenis to reset so its internal position tracks scroll = 0.
+          try { window.lenis?.scrollTo(0, { immediate: true }); } catch (_) { resetScrollTop(); }
 
           // ── Step 7: Run leave animation, THEN destroy outgoing scripts ────
           // Awaiting the timeline ensures the slider, CMS filter, etc. remain
@@ -239,15 +236,9 @@ export function initBarba({ initContainer }) {
           const container = data?.next?.container;
           if (!container) return;
 
-          // Hide immediately — container is at its final DOM position (no transform)
-          // so all layout measurements will be correct, but the user sees nothing
-          // during the ~50ms init phase.
-          container.style.visibility = "hidden";
-
-          // Clear stale IX2 vars; sync page identity; create Lenis.
+          // Clear stale IX2 vars; sync page identity.
           resetIX2CSSVars();
           syncWebflowPageIdFromNextHtml(data?.next?.html || "");
-          createLenis();
           reinitWebflowIX2();
 
           // resetWCurrent MUST run after reinitWebflowIX2 — IX2.ready() can
@@ -280,14 +271,10 @@ export function initBarba({ initContainer }) {
           try { window.ScrollTrigger?.refresh(); } catch (_) {}
           try { window.lenis?.resize?.(); } catch (_) {}
 
-          startLenis();
-
-          // Reveal container and run the slide-in animation.
+          // Run the slide-in animation.
           // The fixed wrapper isolates the container from native scroll compositing:
           // without it, scroll momentum on short pages (Work) adds on top of the
           // GSAP transform and makes the animation non-deterministic ("tug" effect).
-          container.style.visibility = "visible";
-
           const wrapper = document.createElement("div");
           wrapper.style.cssText =
             "position:fixed;inset:0;overflow:hidden;z-index:2;pointer-events:none;";

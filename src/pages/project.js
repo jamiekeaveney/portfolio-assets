@@ -83,13 +83,12 @@ function initCmsNext(container) {
 // When progress reaches 100%, navigates to the next project via location.href,
 // which bypasses Barba entirely (intentional — this is a seamless native nav).
 //
-// CRITICAL: the pinned ScrollTrigger MUST be created AFTER clearProps removes
-// the Barba enter animation transform from the container. A CSS transform on any
-// ancestor prevents ScrollTrigger from calculating pin spacer height correctly,
-// resulting in zero scroll distance. We enforce this via ctx.onPostTransition,
-// which runs in barba's after() hook, after clearProps.
+// The pinned ScrollTrigger is created as soon as initCmsNext has settled the
+// CMS list to exactly one item (waitOne rAF poll). The container is untransformed
+// when initScrollToNext runs (fixed-wrapper animation strategy), so pin spacer
+// height is measured correctly on both first load and navigation.
 
-function initScrollToNext(container, ctx) {
+function initScrollToNext(container) {
   if (!window.gsap || !window.ScrollTrigger) return;
 
   window.gsap.registerPlugin(window.ScrollTrigger);
@@ -181,13 +180,9 @@ function initScrollToNext(container, ctx) {
       try { window.lenis?.resize?.(); } catch (_) {}
     };
 
-    // Both paths use the same poll-for-one-item approach.
-    // For navigation: deferred to after() so clearProps has removed the
-    //   container's enter-animation transform before ST positions are measured.
-    // For first load: no enter-animation transform, so runs immediately.
-    // In both cases, poll until initCmsNext has reduced the list to exactly
-    // one item — this guards against any async Webflow/jQuery settling that
-    // may not have completed when this callback first runs.
+    // Poll until initCmsNext has reduced the CMS list to exactly one item —
+    // guards against any async Webflow/jQuery settling that may not have
+    // completed when this callback first runs.
     const waitOne = (tries = 200) => {
       const comp = container.querySelector("[tr-cmsnext-element='component']");
       if (!comp) {
@@ -199,11 +194,7 @@ function initScrollToNext(container, ctx) {
       if (tries > 0) requestAnimationFrame(() => waitOne(tries - 1));
     };
 
-    if (ctx && typeof ctx.onPostTransition === "function") {
-      ctx.onPostTransition(() => waitOne());
-    } else {
-      waitOne();
-    }
+    waitOne();
 
     return () => {
       ended = false;
@@ -224,10 +215,10 @@ function initScrollToNext(container, ctx) {
 
 // ─── Public exports ──────────────────────────────────────────────────────────
 
-export function initProject(container, ctx) {
+export function initProject(container) {
   if (!container) return;
   initCmsNext(container);
-  initScrollToNext(container, ctx);
+  initScrollToNext(container);
 }
 
 export function destroyProject() {
