@@ -103,21 +103,15 @@ export function initBarba({ initContainer }) {
     //    A second reinit would destroy + recreate STs, re-fire "on page load"
     //    animations, and cause a visible flash.
 
-    // 3. Sync Lenis position then start it.
-    //    Lenis was kept stopped during the animation (see enter()).
-    //    resize() recalculates scroll extent for the new page height.
-    //    scrollTo(immediate) snaps its internal position to actual window.scrollY
-    //    so it starts from the right place with no velocity.
-    //    startLenis() then begins smooth scroll from that clean state.
+    // 3. Resize Lenis for the new page height (clearProps may have changed it).
+    //    Do NOT call lenis.scrollTo(immediate) — that kills scroll velocity and
+    //    causes a jerk if the user is mid-scroll. Lenis has been running
+    //    continuously, so its internal position is already correct.
     try { window.lenis?.resize?.(); } catch (_) {}
-    try {
-      if (window.lenis) window.lenis.scrollTo(window.scrollY, { immediate: true });
-    } catch (_) {}
-    startLenis();
 
-    // 4. Single synchronous ST.refresh() after clearProps + Lenis running.
-    //    Do NOT use safeRefreshScrollTrigger() — its 200ms delayed call would
-    //    recalculate positions while Lenis may be mid-lerp.
+    // 4. Single synchronous ST.refresh() against the now-clean layout.
+    //    Do NOT use safeRefreshScrollTrigger() — its 200ms delayed call
+    //    recalculates positions while Lenis may be mid-lerp.
     try { window.ScrollTrigger?.refresh(); } catch (_) {}
 
     // 5. Run deferred post-transition callbacks (e.g. pin ST creation).
@@ -130,9 +124,6 @@ export function initBarba({ initContainer }) {
       // Re-sync layout after callbacks (pin spacers change scroll height).
       try { window.ScrollTrigger?.refresh(); } catch (_) {}
       try { window.lenis?.resize?.(); } catch (_) {}
-      try {
-        if (window.lenis) window.lenis.scrollTo(window.scrollY, { immediate: true });
-      } catch (_) {}
     }
 
     resetWCurrent();
@@ -252,7 +243,6 @@ export function initBarba({ initContainer }) {
           // alive and visually intact for the full duration of the leave anim.
           await gsap.timeline().to(data.current.container, {
             y: "-25vh",
-            scale: 0.95,
             opacity: VT_FADE_TO,
             duration: VT_DURATION,
             ease: VT_EASE,
@@ -274,27 +264,24 @@ export function initBarba({ initContainer }) {
           // Sync page ID before IX2 so it targets the correct page's elements.
           syncWebflowPageIdFromNextHtml(data?.next?.html || "");
 
-          // Create Lenis (stopped). Do NOT startLenis() here.
-          // Keeping Lenis stopped during the animation prevents:
-          //   (a) user scroll input from affecting the slide-in animation, and
-          //   (b) Lenis mid-lerp velocity being killed by lenis.scrollTo() in after().
-          // startLenis() is called in the global after() hook once layout is clean.
+          // Create and start Lenis immediately so scroll is live from the
+          // first frame of the transition. This means the incoming page
+          // (Work slider, etc.) responds to input right away.
           createLenis();
-
-          // Init IX2. Positions are approximate mid-animation; corrected by
-          // ST.refresh() in after(). No second IX2 reinit in after().
           reinitWebflowIX2();
 
-          // resetWCurrent() scans document.querySelectorAll("a[href]") and marks
-          // links matching window.location (already updated by Barba) as .w--current.
-          // Must run AFTER the incoming container is in the DOM (it is by now) and
-          // BEFORE initContainer() → initCmsNext() reads .w--current to find the
-          // current project. Webflow.ready() may set .w--current asynchronously,
-          // so we force it synchronously here.
+          // resetWCurrent() scans all a[href] in the document (incoming container
+          // is in the DOM by now) and marks links matching window.location
+          // as .w--current. Must run before initContainer() → initCmsNext()
+          // which uses .w--current to find the current project item.
           resetWCurrent();
 
-          // Single synchronous refresh only — no delayed calls.
+          // Single synchronous refresh — no delayed calls.
           try { window.ScrollTrigger?.refresh(); } catch (_) {}
+
+          // Start Lenis — scroll is live for both the incoming page scripts
+          // and the slider/interactions during the transition animation.
+          startLenis();
 
           _postTransitionCallbacks = [];
 
@@ -305,18 +292,13 @@ export function initBarba({ initContainer }) {
             onPostTransition: (fn) => _postTransitionCallbacks.push(fn)
           });
 
-          // initContainer() calls startLenis() internally at its end.
-          // Immediately stop it again so Lenis doesn't process scroll input
-          // for the remainder of the animation (~1400ms).
-          const initThenStop = initPromise.then(() => stopLenis());
-
           const tl = gsap.timeline().from(data.next.container, {
             y: "100vh",
             duration: VT_DURATION,
             ease: VT_EASE
           });
 
-          await Promise.all([tl, initThenStop]);
+          await Promise.all([tl, initPromise]);
         },
 
         async once(data) {

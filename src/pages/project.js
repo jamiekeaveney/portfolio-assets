@@ -167,30 +167,27 @@ function initScrollToNext(container, ctx) {
       try { window.lenis?.resize?.(); } catch (_) {}
     };
 
-    if (ctx && typeof ctx.onPostTransition === "function") {
-      // Navigation path: defer pin ST creation until after() hook removes the
-      // container's enter-animation transform via clearProps. By this point
-      // initCmsNext has already reduced the list to one item synchronously,
-      // so we can read it directly without polling.
-      ctx.onPostTransition(() => {
-        const comp = container.querySelector("[tr-cmsnext-element='component']");
-        const item = comp?.querySelector(".w-dyn-item");
-        if (item) createPinTrigger(item);
-      });
-    } else {
-      // First load path: no enter-animation transform active.
-      // Poll for initCmsNext to finish reducing the list (it runs synchronously
-      // but the rAF ensures a DOM repaint before we measure).
-      const waitOne = (tries = 200) => {
-        const comp = container.querySelector("[tr-cmsnext-element='component']");
-        if (!comp) {
-          if (tries > 0) requestAnimationFrame(() => waitOne(tries - 1));
-          return;
-        }
-        const items = comp.querySelectorAll(".w-dyn-item");
-        if (items.length === 1) { createPinTrigger(items[0]); return; }
+    // Both paths use the same poll-for-one-item approach.
+    // For navigation: deferred to after() so clearProps has removed the
+    //   container's enter-animation transform before ST positions are measured.
+    // For first load: no enter-animation transform, so runs immediately.
+    // In both cases, poll until initCmsNext has reduced the list to exactly
+    // one item — this guards against any async Webflow/jQuery settling that
+    // may not have completed when this callback first runs.
+    const waitOne = (tries = 200) => {
+      const comp = container.querySelector("[tr-cmsnext-element='component']");
+      if (!comp) {
         if (tries > 0) requestAnimationFrame(() => waitOne(tries - 1));
-      };
+        return;
+      }
+      const items = comp.querySelectorAll(".w-dyn-item");
+      if (items.length === 1) { createPinTrigger(items[0]); return; }
+      if (tries > 0) requestAnimationFrame(() => waitOne(tries - 1));
+    };
+
+    if (ctx && typeof ctx.onPostTransition === "function") {
+      ctx.onPostTransition(() => waitOne());
+    } else {
       waitOne();
     }
 

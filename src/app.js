@@ -25,6 +25,10 @@ export async function initContainer(container, ctx = {}) {
 
   runCleanups();
   createLenis();
+  // Start Lenis as early as possible so scroll is live from the first frame.
+  // For navigation paths, enter() also calls startLenis() before initContainer()
+  // runs — this call is a no-op in that case (Lenis already started).
+  startLenis();
   initSplit(container);
   initVideoAuto(container);
   initVarsGrouped(container, ctx);
