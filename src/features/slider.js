@@ -109,7 +109,13 @@ export function initSlider(container) {
   track.onclick = (e) => {
     if (s.dragged || now() < s.clickUntil) { e.preventDefault(); return; }
     const link = e.target.closest(".slide")?.querySelector("a[href]");
-    if (link) { e.preventDefault(); location.href = link.href; }
+    if (link) {
+      e.preventDefault();
+      // Use barba.go() so the transition fires correctly.
+      // Fall back to location.href if Barba isn't available.
+      if (window.barba) window.barba.go(link.href);
+      else location.href = link.href;
+    }
   };
 
   s.pitch = getPitch();

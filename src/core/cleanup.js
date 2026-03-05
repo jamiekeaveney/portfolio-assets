@@ -17,6 +17,25 @@ export function runCleanups() {
   }
 }
 
+/**
+ * Captures the current cleanup queue and clears it without running.
+ * Returns a function that, when called, runs the captured cleanups.
+ *
+ * Use in Barba leave() to keep outgoing scripts alive during the leave
+ * animation. Call the returned function only after the animation resolves.
+ *
+ * Any new addCleanup() calls made AFTER captureCleanups() (e.g. in enter())
+ * go into the now-empty queue and belong to the incoming page.
+ */
+export function captureCleanups() {
+  const captured = cleanups.splice(0); // take all, clear array in-place
+  return function runCaptured() {
+    for (let i = 0; i < captured.length; i++) {
+      try { captured[i](); } catch (_) {}
+    }
+  };
+}
+
 /** Utility: bind event listener + auto cleanup */
 export function on(el, event, handler, options) {
   if (!el || !el.addEventListener) return () => {};

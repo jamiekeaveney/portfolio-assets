@@ -1,4 +1,4 @@
-import { runCleanups } from "../core/cleanup.js";
+import { runCleanups, captureCleanups } from "../core/cleanup.js";
 import { stopLenis, destroyLenis, createLenis, startLenis } from "../core/lenis.js";
 import { killAllScrollTriggers, safeRefreshScrollTrigger } from "../core/scrolltrigger.js";
 import {
@@ -91,37 +91,32 @@ export function initBarba({ initContainer }) {
   window.barba.hooks.after(() => setCursorBusy(false));
 
   window.barba.hooks.after((data) => {
-    // Stop Lenis FIRST — prevents lerp from fighting layout changes below.
-    stopLenis();
-
     // 1. Remove all transition inline styles so layout is settled.
+    //    Do NOT stop/restart Lenis here — it's already running from enter(),
+    //    stopping it mid-lerp causes a velocity jolt when it restarts.
     window.gsap?.set(data?.next?.container, {
       clearProps:
         "position,top,left,right,bottom,width,height,overflow,zIndex,opacity,transform,backgroundColor"
     });
 
-    // 2. Do NOT reinitWebflowIX2() here.
-    //    IX2 was already initialised in enter() for immediate scroll responsiveness
-    //    during the transition. Calling it a second time here causes a visible jump:
-    //    IX2 destroys + recreates STs, re-measures progress at the current scroll
-    //    position, and re-fires "on page load" animations — all causing flashes.
-    //    ST.refresh() below is sufficient to correct trigger positions after clearProps.
+    // 2. Do NOT reinitWebflowIX2() here — already called in enter().
+    //    A second reinit would destroy + recreate STs, re-fire "on page load"
+    //    animations, and cause a visible flash.
 
-    // 3. Refresh ScrollTrigger against the now-clean layout.
-    safeRefreshScrollTrigger();
+    // 3. Single synchronous ST.refresh() against the now-clean layout.
+    //    Do NOT use safeRefreshScrollTrigger() here — its 200ms delayed call
+    //    fires while Lenis is still lerping, recalculates positions against a
+    //    mid-lerp scroll offset, and causes a snap.
+    try { window.ScrollTrigger?.refresh(); } catch (_) {}
 
-    // 4. Resize Lenis for the new page height, then snap its internal scroll
-    //    position to the actual window.scrollY — this flushes any lerp that
-    //    accumulated during the transition and prevents the post-transition jolt.
+    // 4. Snap Lenis's internal position to actual scrollY — flushes any lerp
+    //    that accumulated during the transition without a visible jolt.
     try { window.lenis?.resize?.(); } catch (_) {}
     try {
       if (window.lenis) window.lenis.scrollTo(window.scrollY, { immediate: true });
     } catch (_) {}
 
-    // 5. Restart Lenis with clean state.
-    startLenis();
-
-    // 6. Run deferred post-transition callbacks.
+    // 5. Run deferred post-transition callbacks (e.g. pin ST creation).
     //    These run AFTER clearProps so the container has no transform — critical
     //    for pin-based ScrollTriggers (transform ancestors break pin spacer calc).
     if (_postTransitionCallbacks.length) {
@@ -129,7 +124,7 @@ export function initBarba({ initContainer }) {
       _postTransitionCallbacks = [];
 
       // Re-sync layout after callbacks (pin spacers change scroll height).
-      safeRefreshScrollTrigger();
+      try { window.ScrollTrigger?.refresh(); } catch (_) {}
       try { window.lenis?.resize?.(); } catch (_) {}
       try {
         if (window.lenis) window.lenis.scrollTo(window.scrollY, { immediate: true });
@@ -175,7 +170,7 @@ export function initBarba({ initContainer }) {
         name: "slide",
         sync: true,
 
-        leave(data) {
+        async leave(data) {
           closeNav();
 
           const gsap = window.gsap;
@@ -184,8 +179,6 @@ export function initBarba({ initContainer }) {
           // ── Step 1: Freeze sticky elements ────────────────────────────────
           // Must happen FIRST — before Lenis stops or scroll resets.
           // Converts position:sticky → position:absolute at current pixel coords.
-          // Without this, setting overflow:hidden (or position:fixed) on the
-          // container breaks the sticky scroll context and causes a visual pop.
           freezeStickyInContainer(data.current.container);
 
           // ── Step 2: Snapshot CSS vars onto the outgoing container ─────────
@@ -193,24 +186,33 @@ export function initBarba({ initContainer }) {
           // resetIX2CSSVars() can clear :root/body without conflict.
           const restoreOutgoingVars = snapshotIX2CSSVars(data.current.container);
 
-          // ── Step 3: Tear down scroll-driven systems ───────────────────────
+          // ── Step 3: Capture (don't run) outgoing page cleanups ────────────
+          // captureCleanups() drains the queue WITHOUT calling anything.
+          // This keeps slider RAF, CMS filter (mm.revert), etc. alive through
+          // the leave animation. New addCleanup() calls from enter() go into
+          // the now-empty queue and belong to the incoming page.
+          const runOutgoingCleanup = captureCleanups();
+
+          // ── Step 4: Tear down only the scroll systems ─────────────────────
+          // Lenis and ScrollTriggers must be destroyed NOW so enter() can
+          // create fresh ones (createLenis is idempotent, but STs need a clean slate).
           stopLenis();
-          runCleanups();   // slider: cancels RAF + removes listeners, does NOT restore DOM
           destroyLenis();
           killAllScrollTriggers(); // GSAP reverts scrub tweens to 0 here
 
-          // ── Step 4: Re-apply frozen CSS vars ──────────────────────────────
-          // GSAP's kill reverted :root/body vars to 0 in step 3.
+          // ── Step 5: Re-apply frozen CSS vars ──────────────────────────────
+          // GSAP's kill reverted :root/body vars to 0 in step 4.
           // Re-applying to the container locks the visual state for the leave animation.
           restoreOutgoingVars();
 
           destroyPage(getNamespace(data, "current"));
 
-          if (!gsap) return;
+          if (!gsap) {
+            runOutgoingCleanup();
+            return;
+          }
 
-          // ── Step 5: Position outgoing container for leave animation ───────
-          // No overflow:hidden — it breaks the absolute-positioned sticky children
-          // we just froze in step 1.
+          // ── Step 6: Position outgoing container for leave animation ───────
           gsap.set(data.current.container, {
             position: "fixed",
             top: -scrollY,
@@ -229,11 +231,14 @@ export function initBarba({ initContainer }) {
 
           gsap.set(data.next.container, { zIndex: 2 });
 
-          // Reset scroll AFTER fixing container — the container is already fixed
-          // so this won't shift its absolute-positioned children.
+          // Reset scroll AFTER fixing container — container is fixed so its
+          // absolute-positioned sticky children won't shift.
           resetScrollTop();
 
-          return gsap.timeline().to(data.current.container, {
+          // ── Step 7: Run leave animation, THEN destroy outgoing scripts ────
+          // Awaiting the timeline ensures the slider, CMS filter, etc. remain
+          // alive and visually intact for the full duration of the leave anim.
+          await gsap.timeline().to(data.current.container, {
             y: "-25vh",
             scale: 0.95,
             opacity: VT_FADE_TO,
@@ -241,6 +246,9 @@ export function initBarba({ initContainer }) {
             ease: VT_EASE,
             transformOrigin: "50% " + scrollY + "px"
           });
+
+          // Only now tear down outgoing page scripts (slider RAF, CMS mm, etc.)
+          runOutgoingCleanup();
         },
 
         async enter(data) {
