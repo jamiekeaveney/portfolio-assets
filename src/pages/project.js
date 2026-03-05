@@ -125,6 +125,20 @@ function initScrollToNext(container, ctx) {
           pin: true,
           scrub: true,
           invalidateOnRefresh: true,
+          onRefresh: (self) => {
+            // Re-sync started/class state after any ST.refresh() call,
+            // so .start-transition is correct if refresh fires while the
+            // user is already past the trigger start point.
+            if (!ended) {
+              if (self.progress > 0.001 && !started) {
+                started = true;
+                pinned.classList.add("start-transition");
+              } else if (self.progress <= 0.001 && started) {
+                started = false;
+                pinned.classList.remove("start-transition");
+              }
+            }
+          },
           onUpdate: (self) => {
             const p = self.progress;
             const atEnd = p >= 0.999;
