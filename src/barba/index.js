@@ -103,18 +103,22 @@ export function initBarba({ initContainer }) {
     //    A second reinit would destroy + recreate STs, re-fire "on page load"
     //    animations, and cause a visible flash.
 
-    // 3. Single synchronous ST.refresh() against the now-clean layout.
-    //    Do NOT use safeRefreshScrollTrigger() here — its 200ms delayed call
-    //    fires while Lenis is still lerping, recalculates positions against a
-    //    mid-lerp scroll offset, and causes a snap.
-    try { window.ScrollTrigger?.refresh(); } catch (_) {}
-
-    // 4. Snap Lenis's internal position to actual scrollY — flushes any lerp
-    //    that accumulated during the transition without a visible jolt.
+    // 3. Sync Lenis position then start it.
+    //    Lenis was kept stopped during the animation (see enter()).
+    //    resize() recalculates scroll extent for the new page height.
+    //    scrollTo(immediate) snaps its internal position to actual window.scrollY
+    //    so it starts from the right place with no velocity.
+    //    startLenis() then begins smooth scroll from that clean state.
     try { window.lenis?.resize?.(); } catch (_) {}
     try {
       if (window.lenis) window.lenis.scrollTo(window.scrollY, { immediate: true });
     } catch (_) {}
+    startLenis();
+
+    // 4. Single synchronous ST.refresh() after clearProps + Lenis running.
+    //    Do NOT use safeRefreshScrollTrigger() — its 200ms delayed call would
+    //    recalculate positions while Lenis may be mid-lerp.
+    try { window.ScrollTrigger?.refresh(); } catch (_) {}
 
     // 5. Run deferred post-transition callbacks (e.g. pin ST creation).
     //    These run AFTER clearProps so the container has no transform — critical
@@ -270,23 +274,27 @@ export function initBarba({ initContainer }) {
           // Sync page ID before IX2 so it targets the correct page's elements.
           syncWebflowPageIdFromNextHtml(data?.next?.html || "");
 
-          // Create Lenis before IX2 so the scroll → ST.update() path exists
-          // the moment the first IX2 ScrollTriggers are created.
+          // Create Lenis (stopped). Do NOT startLenis() here.
+          // Keeping Lenis stopped during the animation prevents:
+          //   (a) user scroll input from affecting the slide-in animation, and
+          //   (b) Lenis mid-lerp velocity being killed by lenis.scrollTo() in after().
+          // startLenis() is called in the global after() hook once layout is clean.
           createLenis();
 
-          // Init IX2 NOW — "while scrolling in view" STs are live immediately,
-          // so scroll responds during the transition animation.
-          // Positions are approximate (container is mid-animation); corrected
-          // by ST.refresh() in after(). No second IX2 reinit in after().
+          // Init IX2. Positions are approximate mid-animation; corrected by
+          // ST.refresh() in after(). No second IX2 reinit in after().
           reinitWebflowIX2();
 
-          // Single synchronous refresh — no delayed calls.
-          // safeRefreshScrollTrigger fires at 0/16/200ms; the 200ms call would
-          // hit during the animation and corrupt mid-flight ST positions.
-          try { window.ScrollTrigger?.refresh(); } catch (_) {}
+          // resetWCurrent() scans document.querySelectorAll("a[href]") and marks
+          // links matching window.location (already updated by Barba) as .w--current.
+          // Must run AFTER the incoming container is in the DOM (it is by now) and
+          // BEFORE initContainer() → initCmsNext() reads .w--current to find the
+          // current project. Webflow.ready() may set .w--current asynchronously,
+          // so we force it synchronously here.
+          resetWCurrent();
 
-          // Start Lenis — scroll now drives IX2 vars in real time.
-          startLenis();
+          // Single synchronous refresh only — no delayed calls.
+          try { window.ScrollTrigger?.refresh(); } catch (_) {}
 
           _postTransitionCallbacks = [];
 
@@ -297,13 +305,18 @@ export function initBarba({ initContainer }) {
             onPostTransition: (fn) => _postTransitionCallbacks.push(fn)
           });
 
+          // initContainer() calls startLenis() internally at its end.
+          // Immediately stop it again so Lenis doesn't process scroll input
+          // for the remainder of the animation (~1400ms).
+          const initThenStop = initPromise.then(() => stopLenis());
+
           const tl = gsap.timeline().from(data.next.container, {
             y: "100vh",
             duration: VT_DURATION,
             ease: VT_EASE
           });
 
-          await Promise.all([tl, initPromise]);
+          await Promise.all([tl, initThenStop]);
         },
 
         async once(data) {
