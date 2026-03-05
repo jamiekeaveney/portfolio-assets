@@ -2,6 +2,7 @@
 import { initScroll1 } from "../features/scroll-1.js";
 import { initLenisCentre } from "../features/lenis-centre.js";
 import { runLoader, loaderHide } from "../features/loader.js";
+import { stopLenis, startLenis } from "../core/lenis.js";
 
 // ── Fine-tune this to control how soon home content reveals ──
 // 0 = reveals start the instant 100% begins its stagger-out
@@ -17,6 +18,7 @@ export async function initHome(container, ctx) {
     if (homeStarted) return;
     homeStarted = true;
 
+    startLenis();
     initScroll1(container, ctx);
     initLenisCentre(container);
 
@@ -30,6 +32,9 @@ export async function initHome(container, ctx) {
   };
 
   if (ctx && ctx.isFirstLoad) {
+    // Lock scroll during the loader — Lenis was started early in initContainer()
+    // but the page must not be scrollable while the loader is visible.
+    stopLenis();
     await runLoader(1.5, container, {
       onRevealStart: startHomeNow
     });
