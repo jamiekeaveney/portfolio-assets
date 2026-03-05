@@ -1,4 +1,3 @@
-import { addCleanup } from "./cleanup.js";
 
 let _lenisTickerFn = null;
 let _lenisScrollUpdateFn = null;
@@ -36,8 +35,11 @@ export function createLenis() {
     })(0);
   }
 
-  // Auto cleanup if the view is torn down
-  addCleanup(() => destroyLenis());
+  // NOTE: Lenis is NOT registered via addCleanup().
+  // Its lifecycle is managed explicitly by Barba's leave() → destroyLenis().
+  // Putting destroyLenis in the cleanup queue would cause captureCleanups()
+  // to defer it, and runOutgoingCleanup() would then kill the INCOMING Lenis
+  // right as the leave animation ends.
 
   return lenis;
 }

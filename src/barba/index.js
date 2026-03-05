@@ -96,7 +96,7 @@ export function initBarba({ initContainer }) {
     //    stopping it mid-lerp causes a velocity jolt when it restarts.
     window.gsap?.set(data?.next?.container, {
       clearProps:
-        "position,top,left,right,bottom,width,height,overflow,zIndex,opacity,transform,backgroundColor"
+        "position,top,left,right,bottom,width,height,overflow,zIndex,opacity,transform,backgroundColor,pointerEvents"
     });
 
     // 2. Do NOT reinitWebflowIX2() here — already called in enter().
@@ -230,6 +230,14 @@ export function initBarba({ initContainer }) {
           }
 
           gsap.set(data.next.container, { zIndex: 2 });
+
+          // Block events on the outgoing container only.
+          // This is scoped to the outgoing element so the incoming container
+          // (Work slider, etc.) can receive events immediately.
+          // Any global html.is-transitioning CSS rule that sets pointer-events:none
+          // must NOT apply to the incoming container — this inline override wins.
+          data.current.container.style.pointerEvents = "none";
+          data.next.container.style.pointerEvents   = "auto";
 
           // Reset scroll AFTER fixing container — container is fixed so its
           // absolute-positioned sticky children won't shift.
