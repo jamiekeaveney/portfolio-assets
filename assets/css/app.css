@@ -233,3 +233,22 @@ html.is-transitioning {
   opacity: 0 !important;
   visibility: hidden !important;
 }
+
+
+
+
+
+
+.pinned-section.start-transition .case-name-loading {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  user-select: text;
+}
+
+.pinned-section.start-transition .case-name {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+}
