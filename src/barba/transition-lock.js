@@ -35,18 +35,47 @@ function _doUnlock() {
   startLenis();
 }
 
+export function ensureOverlay(container) {
+  if (!container) return null;
+
+  let el = container.querySelector(":scope > .page-overlay");
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "page-overlay";
+    el.setAttribute("aria-hidden", "true");
+    container.insertBefore(el, container.firstChild);
+  }
+  return el;
+}
+
+export function resetOverlay(container) {
+  const el = container?.querySelector(":scope > .page-overlay");
+  if (!el) return;
+
+  if (window.gsap) {
+    window.gsap.set(el, { opacity: 0 });
+  } else {
+    el.style.opacity = "0";
+  }
+}
+
 export function bindTransitionLockSafety() {
   if (_safetyBound) return;
   _safetyBound = true;
 
   window.addEventListener("pageshow", () => {
     forceUnlockTransition();
+    clearProjectNextTransition();
     clearHandoffOverlays();
   });
 
-  // On browser history nav, clear stale overlays/state early.
   window.addEventListener("popstate", () => {
+    // Make back/forward deterministic by clearing stale lock/overlay/state.
+    forceUnlockTransition();
+    clearProjectNextTransition();
     clearHandoffOverlays();
+
+    try { window.scrollTo(0, 0); } catch (_) {}
   });
 }
 

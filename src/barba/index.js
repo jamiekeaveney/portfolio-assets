@@ -1,5 +1,5 @@
 import { runCleanups, captureCleanups } from "../core/cleanup.js";
-import { killAllScrollTriggers }        from "../core/scrolltrigger.js";
+import { killAllScrollTriggers } from "../core/scrolltrigger.js";
 import {
   syncWebflowPageIdFromNextHtml,
   reinitWebflowIX2,
@@ -14,18 +14,16 @@ import {
   lockTransition,
   unlockTransition,
   forceUnlockTransition,
+  ensureOverlay,
+  resetOverlay,
   clearProjectNextTransition,
   clearHandoffOverlays,
   bindTransitionLockSafety
 } from "./transition-lock.js";
 import { createProjectNextHandoff } from "../features/project-next-handoff.js";
 
-// ── Constants ────────────────────────────────────────────────────────────────
-
 const VT_DURATION = 1.5;
-const VT_EASE     = "cubic-bezier(0.25, 0.1, 0.25, 1)";
-
-// ── Init guard for __projectNextTransition ───────────────────────────────────
+const VT_EASE = "cubic-bezier(0.25, 0.1, 0.25, 1)";
 
 if (!window.__projectNextTransition) {
   window.__projectNextTransition = {
@@ -41,11 +39,7 @@ if (!window.__projectNextTransition) {
   };
 }
 
-// ── Post-transition callback queue ───────────────────────────────────────────
-
 let _postTransitionCallbacks = [];
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function resetIX2CSSVars() {
   [document.documentElement, document.body].forEach((el) => {
@@ -124,8 +118,6 @@ function prepareIncomingContainerForProject(container) {
   });
 }
 
-// ── initBarba ────────────────────────────────────────────────────────────────
-
 export function initBarba({ initContainer }) {
   if (!window.barba) return console.warn("Barba not loaded.");
 
@@ -153,8 +145,6 @@ export function initBarba({ initContainer }) {
 
   try { history.scrollRestoration = "manual"; } catch (_) {}
 
-  // ── Global before ────────────────────────────────────────────────────────
-
   window.barba.hooks.before((data) => {
     document.documentElement.classList.add("is-transitioning");
     resetWCurrent(data?.next?.url?.path);
@@ -163,15 +153,12 @@ export function initBarba({ initContainer }) {
 
     clearHandoffOverlays();
 
-    // Only preserve project-next state for project->project.
     if (!isProjectToProject(data) && !window.__projectNextTransition?.inProgress) {
       clearProjectNextTransition();
     }
 
     lockTransition();
   });
-
-  // ── Global after ─────────────────────────────────────────────────────────
 
   window.barba.hooks.after((data) => {
     document.documentElement.classList.remove("is-transitioning");
@@ -193,10 +180,6 @@ export function initBarba({ initContainer }) {
     prevent: preventBarba,
 
     transitions: [
-
-      // ══════════════════════════════════════════════════════════════════════
-      // PROJECT → PROJECT
-      // ══════════════════════════════════════════════════════════════════════
       {
         name: "project-to-project",
         sync: true,
@@ -238,7 +221,8 @@ export function initBarba({ initContainer }) {
           hardScrollReset();
 
           // IMPORTANT:
-          // No outgoing fade. No overlay fade. No opacity-out at all.
+          // No opacity-out, no overlay fade, no hidden-out animation.
+          // The handoff proxy owns the visual transition.
           runOutgoingCleanup();
         },
 
@@ -291,8 +275,8 @@ export function initBarba({ initContainer }) {
           resetWCurrent();
 
           clearIncomingContainerProps(container);
-
           container.style.pointerEvents = "";
+
           hardScrollReset();
           unlockTransition();
 
@@ -314,9 +298,6 @@ export function initBarba({ initContainer }) {
         after() {}
       },
 
-      // ══════════════════════════════════════════════════════════════════════
-      // PANEL-NAV
-      // ══════════════════════════════════════════════════════════════════════
       {
         name: "panel-nav",
         sync: false,
@@ -357,9 +338,6 @@ export function initBarba({ initContainer }) {
         }
       },
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SLIDE (general)
-      // ══════════════════════════════════════════════════════════════════════
       {
         name: "slide",
         sync: true,
@@ -371,13 +349,10 @@ export function initBarba({ initContainer }) {
           const scrollY = window.scrollY || window.pageYOffset || 0;
 
           freezeStickyInContainer(data.current.container);
-
           const restoreOutgoingVars = snapshotIX2CSSVars(data.current.container);
           const runOutgoingCleanup = captureCleanups();
-
           killAllScrollTriggers();
           restoreOutgoingVars();
-
           destroyPage(getNamespace(data, "current"));
 
           if (!gsap) {
@@ -392,23 +367,36 @@ export function initBarba({ initContainer }) {
             width: "100%",
             height: "auto",
             zIndex: 1,
-            y: 0,
             opacity: 1
           });
 
+          const overlay = ensureOverlay(data.current.container);
+          if (overlay) resetOverlay(data.current.container);
+
+          gsap.set(data.next.container, { zIndex: 2 });
           data.current.container.style.pointerEvents = "none";
           data.next.container.style.pointerEvents = "none";
 
           hardScrollReset();
 
-          // IMPORTANT:
-          // No overlay fade, no opacity fade. Only the stacking/parallax move.
-          await gsap.to(data.current.container, {
+          const leaveTl = gsap.timeline();
+
+          if (overlay) {
+            leaveTl.to(overlay, {
+              opacity: 0.45,
+              duration: VT_DURATION,
+              ease: VT_EASE
+            }, 0);
+          }
+
+          leaveTl.to(data.current.container, {
             y: "-25vh",
             duration: VT_DURATION,
             ease: VT_EASE,
             transformOrigin: "50% " + scrollY + "px"
-          });
+          }, 0);
+
+          await leaveTl;
 
           runOutgoingCleanup();
         },
