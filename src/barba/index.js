@@ -3,6 +3,8 @@ import { killAllScrollTriggers }        from "../core/scrolltrigger.js";
 import {
   syncWebflowPageIdFromNextHtml,
   reinitWebflowIX2,
+  destroyAndInitIX2,
+  readyWebflow,
   resetWCurrent
 } from "../core/webflow.js";
 import { closeNav, isFromPanel, clearFromPanel } from "../core/nav.js";
@@ -116,8 +118,6 @@ export function initBarba({ initContainer }) {
     resetWCurrent(data?.next?.url?.path);
 
     // Remove any orphaned handoff overlays from a previous errored transition.
-    // Do NOT clear __projectNextTransition here — it may contain data that
-    // the forthcoming p2p transition needs (inProgress guard is our signal).
     clearHandoffOverlays();
 
     // Lock scroll for all transitions.
@@ -166,8 +166,10 @@ export function initBarba({ initContainer }) {
           getNamespace(data, "next")    === "project",
 
         // ── Leave ──────────────────────────────────────────────────────────
-        // Outgoing page fades out beneath the handoff overlay clones.
-        // No y-movement — the clones carry all visual motion.
+        // Outgoing page is fixed at its current scroll position and held
+        // behind the incoming container (z-index 1 vs 2). No fade — the
+        // incoming container covers it entirely at z-index 2. Removing the
+        // fade eliminates the race between source fading and proxy appearing.
         async leave(data) {
           closeNav();
 
@@ -196,7 +198,7 @@ export function initBarba({ initContainer }) {
             zIndex:   1
           });
 
-          // Incoming container: hidden and non-interactive until handoff.
+          // Incoming container: hidden, on top, non-interactive until handoff.
           gsap.set(data.next.container, { zIndex: 2, opacity: 0 });
           data.current.container.style.pointerEvents = "none";
           data.next.container.style.pointerEvents    = "none";
@@ -204,14 +206,14 @@ export function initBarba({ initContainer }) {
           // Reset both Lenis internal position and native scroll to 0.
           hardScrollReset();
 
-          // Fade outgoing page out over the handoff duration.
-          await gsap.to(data.current.container, {
-            opacity:  0,
-            duration: VT_DURATION,
-            ease:     "expo.inOut"
-          });
-
+          // Tear down outgoing scripts now — the DOM stays in place until
+          // Barba removes it after enter() also resolves (handoff ~1.5s).
+          // The proxy uses a background-image (not a DOM reference), so
+          // script teardown doesn't break the visual handoff.
           runOutgoingCleanup();
+
+          // Leave resolves immediately. Barba keeps the outgoing container
+          // in the DOM until enter() resolves, so the fixed backdrop stays.
         },
 
         // ── Enter ──────────────────────────────────────────────────────────
@@ -232,8 +234,7 @@ export function initBarba({ initContainer }) {
           // ── B: Init incoming page scripts ─────────────────────────────
           // deferLenisStart keeps Lenis stopped during the handoff.
           // onPostTransition defers initProjectNextPin until after the
-          // animation, when the container is untransformed and overlay
-          // clones are gone — critical for correct pin-spacer measurement.
+          // handoff animation — correct layout, no overlay clones.
           await initContainer(container, {
             isFirstLoad:      false,
             isNavigation:     true,
@@ -258,15 +259,24 @@ export function initBarba({ initContainer }) {
           }
 
           // ── E: Post-animation reinit ───────────────────────────────────
-          reinitWebflowIX2();
+          // destroyAndInitIX2: Webflow.destroy() kills its own STs + applies
+          // IX2 initial states. Does NOT call Webflow.ready() yet — that
+          // would synchronously restore CMS items and break waitOne().
+          destroyAndInitIX2();
           resetWCurrent();
 
-          // postTransition fires HERE — after the handoff, no transforms
-          // on the container. initProjectNextPin pin-spacer is measured
-          // with the fully settled layout.
+          try { window.ScrollTrigger?.refresh(); } catch (_) {}
+
+          // flushPostTransition: creates the pin trigger (and any other
+          // onPostTransition work) while the CMS list is still filtered.
+          // Webflow.destroy() has already run, so these STs are safe from
+          // the next Webflow.ready() call.
           flushPostTransition();
 
-          try { window.ScrollTrigger?.refresh(); } catch (_) {}
+          // readyWebflow: fires Webflow.ready() callbacks (CMS restore, tabs,
+          // sliders, etc.). Safe to call now — pin trigger already created.
+          readyWebflow();
+          resetWCurrent(); // Webflow.ready() may clear .w--current
 
           container.style.pointerEvents = "";
           unlockTransition();
@@ -290,6 +300,9 @@ export function initBarba({ initContainer }) {
       // ══════════════════════════════════════════════════════════════════════
       // PANEL-NAV
       // sync: false — leave finishes before afterEnter starts.
+      // reinitWebflowIX2 (full, incl. Webflow.ready) is safe here because
+      // initContainer runs AFTER it — initCmsNext re-filters AFTER Webflow
+      // has had its chance to restore the list.
       // ══════════════════════════════════════════════════════════════════════
       {
         name: "panel-nav",
@@ -376,7 +389,6 @@ export function initBarba({ initContainer }) {
           });
 
           // Real .page-overlay darkens the outgoing page.
-          // No more transparent-background hack on children.
           const overlay = ensureOverlay(data.current.container);
           if (overlay) gsap.set(overlay, { opacity: 0 });
 
@@ -391,7 +403,6 @@ export function initBarba({ initContainer }) {
           // ── 8: Leave animation ────────────────────────────────────────
           const leaveTl = gsap.timeline();
 
-          // Overlay darkens the outgoing page.
           if (overlay) {
             leaveTl.to(overlay, {
               opacity:  0.6,
@@ -400,7 +411,6 @@ export function initBarba({ initContainer }) {
             }, 0);
           }
 
-          // Outgoing page slides up.
           leaveTl.to(data.current.container, {
             y:               "-25vh",
             duration:        VT_DURATION,
@@ -429,7 +439,6 @@ export function initBarba({ initContainer }) {
           _postTransitionCallbacks = [];
 
           // ── B: Init incoming page scripts ─────────────────────────────
-          // deferLenisStart keeps Lenis stopped during the slide animation.
           await initContainer(container, {
             isFirstLoad:      false,
             isNavigation:     true,
@@ -443,25 +452,38 @@ export function initBarba({ initContainer }) {
           try { window.lenis?.resize?.();        } catch (_) {}
 
           // ── D: Slide-in animation ─────────────────────────────────────
-          await gsap.from(container, {
-            y:        "100vh",
+          // Use gsap.set + gsap.to instead of gsap.from to eliminate the
+          // single-frame gap where the container appears at y:0 before
+          // GSAP applies the from-value on the next RAF tick.
+          gsap.set(container, { y: "100vh" });
+          await gsap.to(container, {
+            y:        0,
             duration: VT_DURATION,
             ease:     VT_EASE
           });
 
           // ── E: Post-animation reinit ───────────────────────────────────
-          // Animation is complete — container is fully untransformed now.
-          // IX2 is reinited first so it can apply its initial states to
-          // elements. ST.refresh() runs next so those initial states are
-          // included in measurements. Only THEN do postTransition callbacks
-          // fire — initProjectNextPin's pin ST is created with the correct
-          // IX2-aware layout.
-          reinitWebflowIX2();
+          // destroyAndInitIX2: applies IX2 initial states without calling
+          // Webflow.ready() — prevents CMS list from being restored before
+          // flushPostTransition creates the pin trigger.
+          // Any STs killed by Webflow.destroy() here were created in Step B.
+          // onPostTransition callbacks (pin trigger, scroll-1) are deferred
+          // to flushPostTransition() below, so they are created AFTER the
+          // kill and survive.
+          destroyAndInitIX2();
           resetWCurrent();
 
           try { window.ScrollTrigger?.refresh(); } catch (_) {}
 
+          // flushPostTransition: runs initProjectNextPin, scroll-1, and any
+          // other deferred callbacks. These STs are created AFTER
+          // Webflow.destroy() and are therefore NOT killed by it.
           flushPostTransition();
+
+          // readyWebflow: Webflow.ready() now fires (CMS list may restore,
+          // tabs/sliders reinit). The pin trigger already exists — safe.
+          readyWebflow();
+          resetWCurrent(); // Webflow.ready() may clear .w--current
 
           unlockTransition();
           try { window.lenis?.resize?.(); } catch (_) {}

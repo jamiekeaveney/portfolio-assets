@@ -24,7 +24,17 @@ export async function initHome(container, ctx) {
     if (!ctx?.deferLenisStart) {
       startLenis();
     }
-    initScroll1(container);
+
+    // Defer scroll-1 via onPostTransition when navigating so that its
+    // ScrollTriggers are created AFTER Webflow.destroy() (in destroyAndInitIX2)
+    // kills all STs in Step E. STs created inside flushPostTransition are safe.
+    // On first load (no onPostTransition) initialise immediately as before.
+    if (typeof ctx?.onPostTransition === "function") {
+      ctx.onPostTransition(() => initScroll1(container));
+    } else {
+      initScroll1(container);
+    }
+
     initLenisCentre(container);
 
     if (ctx && typeof ctx.startLoadReveals === "function") {

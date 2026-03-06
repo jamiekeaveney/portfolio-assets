@@ -25,8 +25,39 @@ export function resetWCurrent(overridePath) {
 }
 
 /**
- * Re-init Webflow + IX2 after Barba swaps containers.
- * Note: this assumes you're on a published Webflow site (Webflow global exists).
+ * Phase 1 of Webflow reinit: destroy all Webflow modules and re-apply IX2
+ * initial states WITHOUT calling Webflow.ready().
+ *
+ * Why split? Webflow.ready() synchronously fires CMS callbacks that restore
+ * filtered CMS lists (undoing initCmsNext's work). Calling it before
+ * flushPostTransition() means waitOne() sees multiple items and never creates
+ * the pin trigger. Calling it AFTER flushPostTransition() is safe because the
+ * pin trigger is already created and pointing to the correct item.
+ */
+export function destroyAndInitIX2() {
+  if (!window.Webflow) return;
+  try { window.Webflow.destroy(); } catch (_) {}
+  try { window.Webflow.require("ix2")?.init?.(); } catch (_) {}
+  try { document.dispatchEvent(new Event("readystatechange")); } catch (_) {}
+}
+
+/**
+ * Phase 2 of Webflow reinit: fire Webflow.ready() callbacks.
+ * Reinitialises Webflow UI components (tabs, sliders, dropdowns, CMS sort/filter).
+ * Call this AFTER flushPostTransition() so CMS restoration doesn't race with
+ * waitOne() in initProjectNextPin.
+ */
+export function readyWebflow() {
+  if (!window.Webflow) return;
+  try { window.Webflow.ready(); } catch (_) {}
+}
+
+/**
+ * Full Webflow reinit in one call (destroy → ready → ix2.init).
+ * Safe for panel-nav afterEnter() where initContainer runs AFTER this call,
+ * so initCmsNext always sees the current URL and re-filters cleanly.
+ * Do NOT use in slide/p2p enter() — use destroyAndInitIX2 + readyWebflow
+ * with flushPostTransition sandwiched between them.
  */
 export function reinitWebflowIX2() {
   if (!window.Webflow) return;
