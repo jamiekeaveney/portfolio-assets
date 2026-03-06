@@ -47,6 +47,14 @@ export function initProjectNextPin(container, options = {}) {
     let tween;
     let ended = false, started = false, lastTxt = "";
 
+    // waitAborted prevents rAF callbacks from a previous mm scope from calling
+    // createPinTrigger() after this scope has been torn down. This is the root
+    // fix for the "pin works after refresh but not on first nav" bug: without
+    // this flag, rAF polling continues across the transition and can call
+    // createPinTrigger() while the slide animation's y:100vh transform is
+    // still applied to the container, baking a wrong pin-spacer measurement.
+    let waitAborted = false;
+
     // ── createPinTrigger ────────────────────────────────────────────────────
     // Called once waitOne() has confirmed the CMS list contains exactly 1 item.
 
@@ -152,6 +160,7 @@ export function initProjectNextPin(container, options = {}) {
     // Guards against any jQuery/Webflow settling that hasn't completed yet.
 
     const waitOne = (tries = 200) => {
+      if (waitAborted) return; // mm scope torn down — do not proceed
       const comp = container.querySelector("[tr-cmsnext-element='component']");
       if (!comp) {
         if (tries > 0) requestAnimationFrame(() => waitOne(tries - 1));
@@ -166,15 +175,18 @@ export function initProjectNextPin(container, options = {}) {
 
     // ── mm cleanup ──────────────────────────────────────────────────────────
     return () => {
+      // Abort any pending rAF poll immediately so it cannot create a stale ST.
+      waitAborted = true;
+
       ended   = false;
       started = false;
       lastTxt = "";
 
       pinned.classList.remove("start-transition", "end-transition");
 
-      // Only restore overflow / start Lenis here when we are NOT mid-transition.
-      // During an active transition the global unlockScroll() in barba/index.js
-      // owns the lifecycle; restoring here would unlock scroll prematurely.
+      // Only restore overflow here when NOT mid-transition. During an active
+      // transition forceUnlockTransition() in the global after() hook owns
+      // the unlock lifecycle; restoring here would unlock scroll prematurely.
       if (!window.__projectNextTransition?.inProgress) {
         root.style.overflow          = "";
         document.body.style.overflow = "";

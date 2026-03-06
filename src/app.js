@@ -25,10 +25,15 @@ export async function initContainer(container, ctx = {}) {
 
   runCleanups();
   createLenis();
-  // Start Lenis as early as possible so scroll is live from the first frame.
-  // For navigation paths, enter() also calls startLenis() before initContainer()
-  // runs — this call is a no-op in that case (Lenis already started).
-  startLenis();
+
+  // During Barba transitions the lock manager owns Lenis start/stop.
+  // ctx.deferLenisStart = true is set by all navigation paths so that
+  // initContainer never starts Lenis while the transition lock is active.
+  // On first load (once()) the flag is absent — Lenis starts normally.
+  if (!ctx.deferLenisStart) {
+    startLenis();
+  }
+
   initSplit(container);
   initVarsGrouped(container, ctx);
   primeRevealLoad(container, ctx);
@@ -58,10 +63,11 @@ export async function initContainer(container, ctx = {}) {
   initRevealScroll(container);
 
   // ST.refresh() and lenis.resize() are NOT called here.
-  // For navigations: called once in barba enter() before the animation,
-  // while scroll=0 and the container is untransformed — the only safe moment.
+  // For navigations: called once in barba enter() before the animation.
   // For first load (once()): called synchronously in the once() hook.
-  startLenis();
+  if (!ctx.deferLenisStart) {
+    startLenis();
+  }
 }
 
 onReady(function () {
