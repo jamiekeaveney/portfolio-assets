@@ -35,14 +35,14 @@ function createOverlayRoot() {
   const el = document.createElement("div");
   el.setAttribute("data-transition-overlay-root", "");
   el.style.cssText =
-    "position:fixed;inset:0;z-index:9999;pointer-events:none;overflow:hidden;";
+    "position:fixed;inset:0;z-index:9999;pointer-events:none;overflow:visible;";
   document.body.appendChild(el);
   return el;
 }
 
 /**
  * Apply fixed-position bounds to `el` so it sits exactly over `bounds`
- * in the viewport. Appended to `parent`.
+ * in the viewport.
  */
 function applyFixedBounds(el, bounds) {
   el.style.cssText +=
@@ -56,15 +56,25 @@ function applyFixedBounds(el, bounds) {
 
 /**
  * Build a fixed-position proxy that visually mirrors the source thumbnail.
- * The source may be an <img> or a wrapper containing one.
+ * Copies border-radius so the pill/rounded shape is preserved throughout
+ * the animation. The source may be an <img> or a wrapper containing one.
  */
 function buildMediaProxy(sourceEl, bounds) {
   const proxy = document.createElement("div");
+
+  // Copy border radius from the source element (it lives on the wrapper, not
+  // the img itself, which is why overflow:hidden alone was losing it).
+  try {
+    const cs = window.getComputedStyle(sourceEl);
+    const br = cs.borderRadius;
+    if (br && br !== "0px") proxy.style.borderRadius = br;
+  } catch (_) {}
+
   proxy.style.overflow = "hidden";
 
   const img = sourceEl.tagName === "IMG" ? sourceEl : sourceEl.querySelector("img");
   if (img?.src) {
-    proxy.style.backgroundImage    = `url('${CSS.escape ? img.src : img.src}')`;
+    proxy.style.backgroundImage    = `url('${img.src}')`;
     proxy.style.backgroundSize     = "cover";
     proxy.style.backgroundPosition = "center";
   } else {
@@ -80,12 +90,16 @@ function buildMediaProxy(sourceEl, bounds) {
 
 /**
  * Build a fixed-position proxy that mirrors the source title text.
- * Copies computed typography so the text looks identical to the source
- * even though it is placed in a detached element.
+ * Copies computed typography — including padding — so the text renders
+ * identically to the source without glyph clipping (ascenders / descenders).
+ *
+ * The outer proxy has NO overflow:hidden; we rely on the bounds being
+ * accurate. Clipping would cut letters like "G" whose ink descends past
+ * the baseline.
  */
 function buildTitleProxy(sourceEl, bounds) {
   const proxy = document.createElement("div");
-  proxy.style.overflow = "hidden";
+  // Deliberately NO overflow:hidden on the outer proxy — it clips descenders.
 
   const inner = sourceEl.cloneNode(true);
 
@@ -101,22 +115,24 @@ function buildTitleProxy(sourceEl, bounds) {
     inner.style.visibility = "visible";
   } catch (_) {}
 
-  // Mirror typography from source computed styles.
+  // Mirror typography from source computed styles, INCLUDING padding.
+  // Zeroing padding shifts glyphs within the bounds and causes the
+  // perceived "jerk" — copying it keeps the text exactly in place.
   try {
     const cs = window.getComputedStyle(sourceEl);
     const props = [
       "fontFamily", "fontSize", "fontWeight", "lineHeight",
-      "letterSpacing", "color", "textTransform", "whiteSpace"
+      "letterSpacing", "color", "textTransform", "whiteSpace",
+      "paddingTop", "paddingRight", "paddingBottom", "paddingLeft"
     ];
     props.forEach((p) => {
       try { inner.style[p] = cs[p]; } catch (_) {}
     });
   } catch (_) {}
 
-  inner.style.margin  = "0";
-  inner.style.padding = "0";
-  inner.style.width   = "100%";
-  inner.style.height  = "100%";
+  inner.style.margin = "0";
+  inner.style.width  = "100%";
+  inner.style.height = "100%";
 
   applyFixedBounds(proxy, bounds);
   proxy.appendChild(inner);
@@ -192,13 +208,23 @@ export function createProjectNextHandoff(data) {
     return tl;
   }
 
-  // ── Overlay root ─────────────────────────────────────────────────────────
-  const overlayRoot = createOverlayRoot();
-
-  // ── Hide real target elements until the clone lands ─────────────────────
+  // ── Hide real target elements before revealing the container ────────────
+  // Hide hero elements first so they don't flash when the container appears.
+  // The overlay clones handle all visual motion; real elements fade in at
+  // FADE_IN_OFFSET when the clone has nearly reached the target position.
   if (tgtMediaEl)     gsap.set(tgtMediaEl,     { opacity: 0 });
   if (tgtTitleWrapEl) gsap.set(tgtTitleWrapEl, { opacity: 0 });
   if (tgtTitleEl)     gsap.set(tgtTitleEl,     { opacity: 0 });
+
+  // Reveal the container immediately — non-hero content should be visible
+  // during the handoff animation. Hero elements are already hidden above so
+  // there is no flash. reveal-load animations have already played (while the
+  // container was opacity:0 before this call), so content is in its final
+  // revealed state — no double-animation.
+  gsap.set(nextContainer, { opacity: 1 });
+
+  // ── Overlay root ─────────────────────────────────────────────────────────
+  const overlayRoot = createOverlayRoot();
 
   // ── A: Media proxy ───────────────────────────────────────────────────────
   if (hasMedia) {
@@ -241,10 +267,10 @@ export function createProjectNextHandoff(data) {
     tl.fromTo(
       wrapProxy,
       {
-        left:   srcTitleWrapBounds.left,
-        top:    srcTitleWrapBounds.top,
-        width:  srcTitleWrapBounds.width,
-        height: srcTitleWrapBounds.height,
+        left:    srcTitleWrapBounds.left,
+        top:     srcTitleWrapBounds.top,
+        width:   srcTitleWrapBounds.width,
+        height:  srcTitleWrapBounds.height,
         opacity: 1
       },
       {
@@ -271,10 +297,10 @@ export function createProjectNextHandoff(data) {
     tl.fromTo(
       titleProxy,
       {
-        left:   srcTitleBounds.left,
-        top:    srcTitleBounds.top,
-        width:  srcTitleBounds.width,
-        height: srcTitleBounds.height,
+        left:    srcTitleBounds.left,
+        top:     srcTitleBounds.top,
+        width:   srcTitleBounds.width,
+        height:  srcTitleBounds.height,
         opacity: 1
       },
       {

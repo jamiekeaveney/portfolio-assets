@@ -18,7 +18,12 @@ export async function initHome(container, ctx) {
     if (homeStarted) return;
     homeStarted = true;
 
-    startLenis();
+    // Only start Lenis if the transition lock isn't holding it stopped.
+    // On first load deferLenisStart is absent (falsy) so Lenis starts normally.
+    // On navigations deferLenisStart:true is set and the lock manager owns Lenis.
+    if (!ctx?.deferLenisStart) {
+      startLenis();
+    }
     initScroll1(container);
     initLenisCentre(container);
 

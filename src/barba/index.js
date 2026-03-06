@@ -247,8 +247,9 @@ export function initBarba({ initContainer }) {
           try { window.lenis?.resize?.();        } catch (_) {}
 
           // ── D: Visual handoff ─────────────────────────────────────────
-          gsap.set(container, { opacity: 1 });
-
+          // createProjectNextHandoff() reveals the container internally
+          // (after hiding hero elements) so there is no premature flash
+          // of page content and no double-animation from reveal-load.
           const handoffTl = createProjectNextHandoff(data);
           try {
             await handoffTl.play();
@@ -450,14 +451,17 @@ export function initBarba({ initContainer }) {
 
           // ── E: Post-animation reinit ───────────────────────────────────
           // Animation is complete — container is fully untransformed now.
-          // postTransition callbacks run HERE so that waitOne() in
-          // initProjectNextPin completes after the slide, not during it.
+          // IX2 is reinited first so it can apply its initial states to
+          // elements. ST.refresh() runs next so those initial states are
+          // included in measurements. Only THEN do postTransition callbacks
+          // fire — initProjectNextPin's pin ST is created with the correct
+          // IX2-aware layout.
           reinitWebflowIX2();
           resetWCurrent();
 
-          flushPostTransition();
-
           try { window.ScrollTrigger?.refresh(); } catch (_) {}
+
+          flushPostTransition();
 
           unlockTransition();
           try { window.lenis?.resize?.(); } catch (_) {}
