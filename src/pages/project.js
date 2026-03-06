@@ -1,227 +1,48 @@
 // src/pages/project.js
-// CMS Project Template page.
+// Project Template page orchestrator.
 //
 // SETUP IN WEBFLOW DESIGNER:
 //   On the Project Template page body/wrapper element:
 //     data-barba="container"
 //     data-barba-namespace="project"
 //
-// Both scripts use gsap.matchMedia() so cleanup fires correctly on Barba
-// navigation (via addCleanup → mm.revert()) and on breakpoint changes.
+// CMS reduction and pin logic live in their own feature files.
+// This file only wires them together and handles the ctx.onPostTransition
+// deferral required for pin-spacer measurement.
 
-import { addCleanup } from "../core/cleanup.js";
-
-// ─── CMS Next/Prev item display ─────────────────────────────────────────────
-// Reduces the CMS list to show only the next (or previous) project item.
-// Snapshots original HTML so it can be restored cleanly on destroy.
-
-function initCmsNext(container) {
-  if (!window.gsap || !window.$) return;
-
-  const mm = window.gsap.matchMedia();
-
-  mm.add("(min-width: 992px)", () => {
-    const $components = window.$("[tr-cmsnext-element='component']", container);
-
-    $components.each(function () {
-      const $component = window.$(this);
-      const $cmsList = $component.find(".w-dyn-items").first();
-      const $cmsItems = $cmsList.children();
-      const $noResult = $component.find("[tr-cmsnext-element='no-result']");
-
-      if ($component.data("cmsnextOriginal") == null) {
-        $component.data("cmsnextOriginal", $cmsList.html());
-      }
-
-      let $current;
-      $cmsItems.each(function () {
-        if (window.$(this).find(".w--current").length) $current = window.$(this);
-      });
-
-      let $next = $current?.next();
-      let $prev = $current?.prev();
-
-      if ($component.attr("tr-cmsnext-loop") === "true") {
-        if (!$next?.length) $next = $cmsItems.first();
-        if (!$prev?.length) $prev = $cmsItems.last();
-      }
-
-      let $display = $next;
-      if ($component.attr("tr-cmsnext-showprev") === "true") $display = $prev;
-
-      if ($component.attr("tr-cmsnext-showall") === "true") {
-        $prev?.addClass("is-prev");
-        $current?.addClass("is-current");
-        $next?.addClass("is-next");
-      } else {
-        $cmsItems.not($display).remove();
-        if (!$display?.length) $noResult.show();
-        if (!$display?.length && $component.attr("tr-cmsnext-hideempty") === "true") {
-          $component.hide();
-        }
-      }
-    });
-
-    return () => {
-      window.$("[tr-cmsnext-element='component']", container).each(function () {
-        const $component = window.$(this);
-        const $cmsList = $component.find(".w-dyn-items").first();
-        const original = $component.data("cmsnextOriginal");
-        if (original != null) $cmsList.html(original);
-        $component.show();
-        $component.find("[tr-cmsnext-element='no-result']").hide();
-        $cmsList.find(".w-dyn-item").removeClass("is-prev is-current is-next");
-      });
-    };
-  });
-
-  addCleanup(() => mm.revert());
-}
-
-// ─── Scroll-to-next-project ──────────────────────────────────────────────────
-// Pins the footer section and scrubs a progress counter as the user scrolls.
-// When progress reaches 100%, navigates to the next project via location.href,
-// which bypasses Barba entirely (intentional — this is a seamless native nav).
-//
-// The pinned ScrollTrigger is created as soon as initCmsNext has settled the
-// CMS list to exactly one item (waitOne rAF poll). The container is untransformed
-// when initScrollToNext runs (fixed-wrapper animation strategy), so pin spacer
-// height is measured correctly on both first load and navigation.
-
-function initScrollToNext(container) {
-  if (!window.gsap || !window.ScrollTrigger) return;
-
-  window.gsap.registerPlugin(window.ScrollTrigger);
-
-  const mm = window.gsap.matchMedia();
-
-  mm.add("(min-width: 992px)", () => {
-    const root = document.documentElement;
-    const pinned = container.querySelector(".pinned-section");
-    if (!pinned) return;
-
-    const counters = container.querySelectorAll(".counter");
-
-    let tween;
-    let ended = false, started = false, lastTxt = "";
-
-    // Creates the pinned ScrollTrigger. Must run on a settled layout (no
-    // ancestor transforms). Called either via onPostTransition (navigation)
-    // or via waitOne rAF (first load — no enter animation transform active).
-    const createPinTrigger = (item) => {
-      const href = item.querySelector("a[href]")?.href;
-      if (!href) return;
-
-      const H = () => window.innerHeight;
-
-      tween = window.gsap.to(root, {
-        "--_feedback---footer-progress": 1,
-        ease: "none",
-        scrollTrigger: {
-          trigger: pinned,
-          start: "top top",
-          end: () => "+=" + H(),
-          pin: true,
-          scrub: true,
-          invalidateOnRefresh: true,
-          onRefresh: (self) => {
-            // Re-sync started/class state after any ST.refresh() call,
-            // so .start-transition is correct if refresh fires while the
-            // user is already past the trigger start point.
-            if (!ended) {
-              if (self.progress > 0.001 && !started) {
-                started = true;
-                pinned.classList.add("start-transition");
-              } else if (self.progress <= 0.001 && started) {
-                started = false;
-                pinned.classList.remove("start-transition");
-              }
-            }
-          },
-          onUpdate: (self) => {
-            const p = self.progress;
-            const atEnd = p >= 0.999;
-
-            if (!ended) {
-              if (!started && p > 0) {
-                started = true;
-                pinned.classList.add("start-transition");
-              } else if (started && p <= 0.001) {
-                started = false;
-                pinned.classList.remove("start-transition");
-              }
-            }
-
-            const txt = String(atEnd ? 100 : Math.floor(p * 100)).padStart(2, "0");
-            if (txt !== lastTxt) {
-              lastTxt = txt;
-              counters.forEach((c) => (c.textContent = txt));
-            }
-
-            if (!ended && atEnd) {
-              ended = true;
-              pinned.classList.add("end-transition");
-              window.lenis?.stop?.();
-              root.style.overflow = "hidden";
-              // location.href bypasses Barba (not a link click). _bypassBarba
-              // is a safety net in case this ever switches to an <a>-based trigger.
-              setTimeout(() => {
-                window._bypassBarba = true;
-                location.href = href;
-              }, 250);
-            }
-          }
-        }
-      });
-
-      // Explicitly refresh after creating the pin ST so the pin spacer
-      // (which adds scroll height) is included in Lenis's scroll extent.
-      try { window.ScrollTrigger?.refresh(); } catch (_) {}
-      try { window.lenis?.resize?.(); } catch (_) {}
-    };
-
-    // Poll until initCmsNext has reduced the CMS list to exactly one item —
-    // guards against any async Webflow/jQuery settling that may not have
-    // completed when this callback first runs.
-    const waitOne = (tries = 200) => {
-      const comp = container.querySelector("[tr-cmsnext-element='component']");
-      if (!comp) {
-        if (tries > 0) requestAnimationFrame(() => waitOne(tries - 1));
-        return;
-      }
-      const items = comp.querySelectorAll(".w-dyn-item");
-      if (items.length === 1) { createPinTrigger(items[0]); return; }
-      if (tries > 0) requestAnimationFrame(() => waitOne(tries - 1));
-    };
-
-    waitOne();
-
-    return () => {
-      ended = false;
-      started = false;
-      lastTxt = "";
-
-      pinned.classList.remove("start-transition", "end-transition");
-      root.style.overflow = "";
-      window.lenis?.start?.();
-
-      if (tween?.scrollTrigger) tween.scrollTrigger.kill(true);
-      tween?.kill();
-    };
-  });
-
-  addCleanup(() => mm.revert());
-}
+import { initCmsNext }        from "../features/cms-next.js";
+import { initProjectNextPin } from "../features/project-next-pin.js";
 
 // ─── Public exports ──────────────────────────────────────────────────────────
 
-export function initProject(container) {
+export function initProject(container, ctx = {}) {
   if (!container) return;
+
+  // CMS reduction runs immediately — it only mutates the DOM and does not
+  // depend on layout being fully settled.
   initCmsNext(container);
-  initScrollToNext(container);
+
+  // The pin trigger creates a ScrollTrigger that measures pin-spacer height.
+  // That measurement is only correct when there are no ancestor transforms
+  // on the container (the slide transition's y:"100vh" from() has cleared by
+  // the time enter() calls initContainer, so it is safe for slide).
+  //
+  // For the project → project transition, initContainer is called BEFORE the
+  // handoff animation; postTransition callbacks fire AFTER it. Deferring to
+  // onPostTransition guarantees transforms and overlay clones are gone before
+  // the pin spacer is measured.
+  //
+  // On first load (ctx.isFirstLoad) and for any path that lacks
+  // onPostTransition, initialise immediately.
+  if (typeof ctx.onPostTransition === "function") {
+    ctx.onPostTransition(() => initProjectNextPin(container));
+  } else {
+    initProjectNextPin(container);
+  }
 }
 
 export function destroyProject() {
-  // Cleanup registered via addCleanup() inside initCmsNext/initScrollToNext.
-  // Those callbacks are drained by runCleanups() in leave() before this is called.
+  // Cleanups registered via addCleanup() inside initCmsNext / initProjectNextPin
+  // are drained by runCleanups() in barba leave() before this is called.
+  // Nothing extra needed here.
 }
