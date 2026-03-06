@@ -14,6 +14,11 @@ if (!window.__projectNextTransition) {
   };
 }
 
+function getThumbProxySource(el) {
+  if (!el) return null;
+  return el.closest(".image-wrap") || el.parentElement || el;
+}
+
 export function initProjectNextPin(container) {
   if (!window.gsap || !window.ScrollTrigger) return;
 
@@ -22,17 +27,20 @@ export function initProjectNextPin(container) {
   const mm = window.gsap.matchMedia();
 
   mm.add("(min-width: 992px)", () => {
-    const root   = document.documentElement;
+    const root = document.documentElement;
     const pinned = container.querySelector(".pinned-section");
     if (!pinned) return;
 
     const counters = container.querySelectorAll(".counter");
+    const components = pinned.querySelectorAll("[tr-cmsnext-element='component']");
 
-    let tween;
+    let tween = null;
+    let observer = null;
     let ended = false;
     let started = false;
     let lastTxt = "";
-    let waitAborted = false;
+    let disposed = false;
+    let rafId = 0;
 
     const resetUi = () => {
       pinned.classList.remove("start-transition", "end-transition");
@@ -40,17 +48,25 @@ export function initProjectNextPin(container) {
       counters.forEach((c) => (c.textContent = "00"));
     };
 
-    const createPinTrigger = (item) => {
-      if (!item || tween) return;
+    const destroyTween = () => {
+      if (tween?.scrollTrigger) {
+        try { tween.scrollTrigger.kill(true); } catch (_) {}
+      }
+      try { tween?.kill(); } catch (_) {}
+      tween = null;
+    };
 
-      const linkEl      = item.querySelector("a[href]");
-      const href        = linkEl?.href;
+    const createPinTrigger = (item) => {
+      if (!item || tween || disposed) return;
+
+      const linkEl = item.querySelector("a[href]");
+      const href = linkEl?.href;
       if (!href) return;
 
-      const thumbEl     = item.querySelector("[data-next-project-thumb]") || null;
+      const thumbEl = item.querySelector("[data-next-project-thumb]") || null;
+      const thumbProxySource = getThumbProxySource(thumbEl);
       const titleWrapEl = item.querySelector("[data-next-project-title-wrap]") || null;
-      const titleEl     = item.querySelector("[data-next-project-title]") || null;
-      const H = () => window.innerHeight;
+      const titleEl = item.querySelector("[data-next-project-title]") || null;
 
       resetUi();
 
@@ -60,7 +76,7 @@ export function initProjectNextPin(container) {
         scrollTrigger: {
           trigger: pinned,
           start: "top top",
-          end: () => "+=" + H(),
+          end: () => "+=" + window.innerHeight,
           pin: true,
           scrub: true,
           invalidateOnRefresh: true,
@@ -101,15 +117,15 @@ export function initProjectNextPin(container) {
               pinned.classList.add("end-transition");
 
               const s = window.__projectNextTransition;
-              s.href                  = href;
-              s.sourceThumbEl         = thumbEl;
-              s.sourceThumbBounds     = thumbEl ? thumbEl.getBoundingClientRect() : null;
-              s.sourceTitleWrapEl     = titleWrapEl;
+              s.href = href;
+              s.sourceThumbEl = thumbProxySource;
+              s.sourceThumbBounds = thumbProxySource ? thumbProxySource.getBoundingClientRect() : null;
+              s.sourceTitleWrapEl = titleWrapEl;
               s.sourceTitleWrapBounds = titleWrapEl ? titleWrapEl.getBoundingClientRect() : null;
-              s.sourceTitleEl         = titleEl;
-              s.sourceTitleBounds     = titleEl ? titleEl.getBoundingClientRect() : null;
+              s.sourceTitleEl = titleEl;
+              s.sourceTitleBounds = titleEl ? titleEl.getBoundingClientRect() : null;
               s.initiatedFromPinnedNext = true;
-              s.inProgress            = true;
+              s.inProgress = true;
 
               root.style.overflow = "hidden";
               document.body.style.overflow = "hidden";
@@ -130,33 +146,49 @@ export function initProjectNextPin(container) {
       try { window.lenis?.resize?.(); } catch (_) {}
     };
 
-    const waitOne = (tries = 240) => {
-      if (waitAborted) return;
-
-      const comp =
-        pinned.querySelector("[tr-cmsnext-element='component']") ||
-        container.querySelector(".pinned-section [tr-cmsnext-element='component']");
-
-      if (!comp) {
-        if (tries > 0) requestAnimationFrame(() => waitOne(tries - 1));
-        return;
+    const resolveSingleItem = () => {
+      if (disposed) return null;
+      for (let i = 0; i < components.length; i++) {
+        const items = components[i].querySelectorAll(".w-dyn-item");
+        if (items.length === 1) return items[0];
       }
+      return null;
+    };
 
-      const items = comp.querySelectorAll(".w-dyn-item");
-
-      if (items.length === 1) {
-        createPinTrigger(items[0]);
-        return;
+    const attemptInit = () => {
+      if (disposed || tween) return;
+      const item = resolveSingleItem();
+      if (item) {
+        createPinTrigger(item);
       }
+    };
 
-      if (tries > 0) requestAnimationFrame(() => waitOne(tries - 1));
+    const scheduleAttempt = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        requestAnimationFrame(attemptInit);
+      });
     };
 
     resetUi();
-    waitOne();
+    scheduleAttempt();
+
+    observer = new MutationObserver(() => {
+      if (!tween) scheduleAttempt();
+    });
+
+    components.forEach((comp) => {
+      try {
+        observer.observe(comp, { childList: true, subtree: true, attributes: true });
+      } catch (_) {}
+    });
 
     return () => {
-      waitAborted = true;
+      disposed = true;
+      cancelAnimationFrame(rafId);
+      destroyTween();
+      try { observer?.disconnect(); } catch (_) {}
+      observer = null;
       ended = false;
       started = false;
       lastTxt = "";
@@ -165,12 +197,8 @@ export function initProjectNextPin(container) {
       if (!window.__projectNextTransition?.inProgress) {
         root.style.overflow = "";
         document.body.style.overflow = "";
-        window.lenis?.start?.();
+        try { window.lenis?.start?.(); } catch (_) {}
       }
-
-      if (tween?.scrollTrigger) tween.scrollTrigger.kill(true);
-      tween?.kill();
-      tween = null;
     };
   });
 

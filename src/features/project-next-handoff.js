@@ -1,6 +1,6 @@
 const HANDOFF_DURATION = 1.5;
 const HANDOFF_EASE = "expo.inOut";
-const TARGET_FADE_AT = HANDOFF_DURATION * 0.92;
+const TARGET_FADE_AT = HANDOFF_DURATION * 0.94;
 
 function getRect(el) {
   if (!el) return null;
@@ -32,22 +32,71 @@ function applyFixedBounds(el, bounds) {
   el.style.boxSizing = "border-box";
 }
 
+function stripInlineTransforms(node) {
+  if (!node) return;
+  try {
+    if (node.nodeType === 1 && node.hasAttribute("style")) {
+      node.style.transform = "";
+      node.style.opacity = "1";
+      node.style.visibility = "visible";
+      node.style.willChange = "";
+      node.style.clipPath = "";
+      node.style.filter = "";
+    }
+    node.querySelectorAll?.("[style]").forEach((el) => {
+      el.style.transform = "";
+      el.style.opacity = "1";
+      el.style.visibility = "visible";
+      el.style.willChange = "";
+      el.style.clipPath = "";
+      el.style.filter = "";
+    });
+  } catch (_) {}
+}
+
+function findRadiusSource(el) {
+  let node = el;
+  for (let i = 0; node && i < 5; i++, node = node.parentElement) {
+    try {
+      const cs = window.getComputedStyle(node);
+      const hasRadius =
+        cs.borderTopLeftRadius !== "0px" ||
+        cs.borderTopRightRadius !== "0px" ||
+        cs.borderBottomRightRadius !== "0px" ||
+        cs.borderBottomLeftRadius !== "0px";
+      if (hasRadius) return node;
+    } catch (_) {}
+  }
+  return el;
+}
+
 function buildMediaProxy(sourceEl, bounds) {
   const proxy = document.createElement("div");
   proxy.setAttribute("data-transition-proxy", "media");
 
-  try {
-    const cs = window.getComputedStyle(sourceEl.parentElement || sourceEl);
-    proxy.style.borderRadius = cs.borderRadius;
-  } catch (_) {}
+  const radiusSource = findRadiusSource(sourceEl);
 
-  proxy.style.overflow = "hidden";
+  try {
+    const cs = window.getComputedStyle(radiusSource);
+    proxy.style.borderTopLeftRadius = cs.borderTopLeftRadius;
+    proxy.style.borderTopRightRadius = cs.borderTopRightRadius;
+    proxy.style.borderBottomRightRadius = cs.borderBottomRightRadius;
+    proxy.style.borderBottomLeftRadius = cs.borderBottomLeftRadius;
+    proxy.style.overflow = "hidden";
+    proxy.style.backgroundColor = cs.backgroundColor;
+  } catch (_) {
+    proxy.style.overflow = "hidden";
+  }
 
   const clone = sourceEl.cloneNode(true);
+  stripInlineTransforms(clone);
+
   clone.style.width = "100%";
   clone.style.height = "100%";
   clone.style.objectFit = "cover";
   clone.style.display = "block";
+  clone.style.position = "absolute";
+  clone.style.inset = "0";
 
   proxy.appendChild(clone);
   applyFixedBounds(proxy, bounds);
@@ -57,7 +106,6 @@ function buildMediaProxy(sourceEl, bounds) {
 function buildWrapProxy(sourceEl, bounds) {
   const proxy = document.createElement("div");
   proxy.setAttribute("data-transition-proxy", "title-wrap");
-
   applyFixedBounds(proxy, bounds);
 
   try {
@@ -69,6 +117,9 @@ function buildWrapProxy(sourceEl, bounds) {
     proxy.style.paddingRight = cs.paddingRight;
     proxy.style.paddingBottom = cs.paddingBottom;
     proxy.style.paddingLeft = cs.paddingLeft;
+    proxy.style.overflow = "visible";
+    proxy.style.whiteSpace = cs.whiteSpace;
+    proxy.style.textAlign = cs.textAlign;
   } catch (_) {}
 
   return proxy;
@@ -79,6 +130,7 @@ function buildTitleProxy(sourceEl, bounds) {
   proxy.setAttribute("data-transition-proxy", "title");
 
   const clone = sourceEl.cloneNode(true);
+  stripInlineTransforms(clone);
 
   try {
     const cs = window.getComputedStyle(sourceEl);
@@ -115,50 +167,90 @@ function buildTitleProxy(sourceEl, bounds) {
   clone.style.transform = "none";
   clone.style.opacity = "1";
   clone.style.visibility = "visible";
+  clone.style.margin = "0";
+  clone.style.display = "block";
 
   applyFixedBounds(proxy, bounds);
+
+  // Give descenders extra room so letters like g/y/j never clip.
+  proxy.style.overflow = "visible";
+  proxy.style.height = `${bounds.height + 12}px`;
+
   proxy.appendChild(clone);
   return proxy;
 }
 
+function hideTargetsForHandoff(nextContainer) {
+  if (!nextContainer) return [];
+  const hidden = [];
+
+  const selectors = [
+    "[data-project-hero-media]",
+    "[data-project-hero-title-wrap]",
+    "[data-project-hero-title]"
+  ];
+
+  selectors.forEach((selector) => {
+    nextContainer.querySelectorAll(selector).forEach((el) => {
+      el.setAttribute("data-transition-hidden-target", "");
+      hidden.push(el);
+    });
+  });
+
+  return hidden;
+}
+
+function revealTargets(hidden, gsap) {
+  hidden.forEach((el) => {
+    gsap.set(el, { autoAlpha: 1, clearProps: "opacity,visibility" });
+    el.removeAttribute("data-transition-hidden-target");
+  });
+}
+
 export function createProjectNextHandoff(data) {
   const gsap = window.gsap;
-  if (!gsap) return { play: () => Promise.resolve(), kill() {} };
+  if (!gsap) {
+    return {
+      play: () => Promise.resolve(),
+      kill() {}
+    };
+  }
 
   const tl = gsap.timeline({ paused: true });
   const state = window.__projectNextTransition || {};
   const nextContainer = data?.next?.container;
 
   if (!state.initiatedFromPinnedNext || !nextContainer) {
-    tl.fromTo(
-      nextContainer || document.body,
-      { opacity: 0 },
-      { opacity: 1, duration: HANDOFF_DURATION, ease: HANDOFF_EASE }
-    );
+    tl.set(nextContainer || document.body, { opacity: 1 });
     return tl;
   }
 
-  const tgtMediaEl     = nextContainer.querySelector("[data-project-hero-media]");
-  const tgtTitleWrapEl = nextContainer.querySelector("[data-project-hero-title-wrap]");
-  const tgtTitleEl     = nextContainer.querySelector("[data-project-hero-title]");
+  const srcThumbEl = state.sourceThumbEl;
+  const srcTitleWrapEl = state.sourceTitleWrapEl;
+  const srcTitleEl = state.sourceTitleEl;
 
-  const srcThumbBounds     = state.sourceThumbBounds;
+  const srcThumbBounds = state.sourceThumbBounds;
   const srcTitleWrapBounds = state.sourceTitleWrapBounds;
-  const srcTitleBounds     = state.sourceTitleBounds;
-  const tgtMediaBounds     = getRect(tgtMediaEl);
+  const srcTitleBounds = state.sourceTitleBounds;
+
+  const tgtMediaEl = nextContainer.querySelector("[data-project-hero-media]");
+  const tgtTitleWrapEl = nextContainer.querySelector("[data-project-hero-title-wrap]");
+  const tgtTitleEl = nextContainer.querySelector("[data-project-hero-title]");
+
+  const tgtMediaBounds = getRect(tgtMediaEl);
   const tgtTitleWrapBounds = getRect(tgtTitleWrapEl);
-  const tgtTitleBounds     = getRect(tgtTitleEl);
+  const tgtTitleBounds = getRect(tgtTitleEl);
 
-  if (tgtMediaEl) gsap.set(tgtMediaEl, { autoAlpha: 0 });
-  if (tgtTitleWrapEl) gsap.set(tgtTitleWrapEl, { autoAlpha: 0 });
-  if (tgtTitleEl) gsap.set(tgtTitleEl, { autoAlpha: 0 });
+  const hiddenTargets = hideTargetsForHandoff(nextContainer);
 
+  // Do NOT hide the next container. Keep it present for geometry, but let the
+  // proxy own the hero handoff visually.
   gsap.set(nextContainer, { opacity: 1 });
 
   const overlayRoot = getOverlayRoot();
 
-  if (state.sourceThumbEl && srcThumbBounds && tgtMediaBounds && tgtMediaEl) {
-    const mediaProxy = buildMediaProxy(state.sourceThumbEl, srcThumbBounds);
+  if (srcThumbEl && srcThumbBounds && tgtMediaBounds && tgtMediaEl) {
+    const mediaProxy = buildMediaProxy(srcThumbEl, srcThumbBounds);
     overlayRoot.appendChild(mediaProxy);
 
     tl.to(
@@ -177,16 +269,10 @@ export function createProjectNextHandoff(data) {
       },
       0
     );
-
-    tl.to(
-      tgtMediaEl,
-      { autoAlpha: 1, duration: 0.18, ease: "none" },
-      TARGET_FADE_AT
-    );
   }
 
-  if (state.sourceTitleWrapEl && srcTitleWrapBounds && tgtTitleWrapBounds && tgtTitleWrapEl) {
-    const wrapProxy = buildWrapProxy(state.sourceTitleWrapEl, srcTitleWrapBounds);
+  if (srcTitleWrapEl && srcTitleWrapBounds && tgtTitleWrapBounds && tgtTitleWrapEl) {
+    const wrapProxy = buildWrapProxy(srcTitleWrapEl, srcTitleWrapBounds);
     overlayRoot.appendChild(wrapProxy);
 
     tl.to(
@@ -205,16 +291,10 @@ export function createProjectNextHandoff(data) {
       },
       0
     );
-
-    tl.to(
-      tgtTitleWrapEl,
-      { autoAlpha: 1, duration: 0.18, ease: "none" },
-      TARGET_FADE_AT
-    );
   }
 
-  if (state.sourceTitleEl && srcTitleBounds && tgtTitleBounds && tgtTitleEl) {
-    const titleProxy = buildTitleProxy(state.sourceTitleEl, srcTitleBounds);
+  if (srcTitleEl && srcTitleBounds && tgtTitleBounds && tgtTitleEl) {
+    const titleProxy = buildTitleProxy(srcTitleEl, srcTitleBounds);
     overlayRoot.appendChild(titleProxy);
 
     tl.to(
@@ -223,7 +303,7 @@ export function createProjectNextHandoff(data) {
         left: tgtTitleBounds.left,
         top: tgtTitleBounds.top,
         width: tgtTitleBounds.width,
-        height: tgtTitleBounds.height,
+        height: tgtTitleBounds.height + 12,
         duration: HANDOFF_DURATION,
         ease: HANDOFF_EASE,
         immediateRender: false,
@@ -233,24 +313,25 @@ export function createProjectNextHandoff(data) {
       },
       0
     );
-
-    tl.to(
-      tgtTitleEl,
-      { autoAlpha: 1, duration: 0.18, ease: "none" },
-      TARGET_FADE_AT
-    );
   }
+
+  tl.call(() => {
+    revealTargets(hiddenTargets, gsap);
+  }, null, TARGET_FADE_AT);
 
   tl.call(() => {
     try { overlayRoot.innerHTML = ""; } catch (_) {}
 
-    if (tgtMediaEl) gsap.set(tgtMediaEl, { clearProps: "opacity,visibility" });
-    if (tgtTitleWrapEl) gsap.set(tgtTitleWrapEl, { clearProps: "opacity,visibility" });
-    if (tgtTitleEl) gsap.set(tgtTitleEl, { clearProps: "opacity,visibility" });
-
     if (window.__projectNextTransition) {
       window.__projectNextTransition.inProgress = false;
       window.__projectNextTransition.initiatedFromPinnedNext = false;
+      window.__projectNextTransition.href = null;
+      window.__projectNextTransition.sourceThumbEl = null;
+      window.__projectNextTransition.sourceThumbBounds = null;
+      window.__projectNextTransition.sourceTitleWrapEl = null;
+      window.__projectNextTransition.sourceTitleWrapBounds = null;
+      window.__projectNextTransition.sourceTitleEl = null;
+      window.__projectNextTransition.sourceTitleBounds = null;
     }
   });
 

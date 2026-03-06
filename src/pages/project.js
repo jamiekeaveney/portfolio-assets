@@ -6,7 +6,13 @@ export function initProject(container, ctx = {}) {
 
   initCmsNext(container, ctx.path || window.location.pathname);
 
-  const bootPin = () => initProjectNextPin(container, ctx);
+  const bootPin = () => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        initProjectNextPin(container, ctx);
+      });
+    });
+  };
 
   if (typeof ctx.onPostTransition === "function") {
     ctx.onPostTransition(bootPin);

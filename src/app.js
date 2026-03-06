@@ -26,10 +26,6 @@ export async function initContainer(container, ctx = {}) {
   runCleanups();
   createLenis();
 
-  // During Barba transitions the lock manager owns Lenis start/stop.
-  // ctx.deferLenisStart = true is set by all navigation paths so that
-  // initContainer never starts Lenis while the transition lock is active.
-  // On first load (once()) the flag is absent — Lenis starts normally.
   if (!ctx.deferLenisStart) {
     startLenis();
   }
@@ -52,19 +48,15 @@ export async function initContainer(container, ctx = {}) {
 
   await initPage(ctx.namespace || "", container, ctx);
 
-  // initVideoAuto runs AFTER initPage so that slider.js clones are in the DOM.
-  // The _initialized guard makes this safe — already-init'd originals are skipped,
-  // only the newly cloned slides (which have no _initialized flag) are bound.
   initVideoAuto(container);
 
-  startLoadReveals();
+  if (!ctx.skipAutoLoadReveals) {
+    startLoadReveals();
+  }
 
   initTextScroll(container);
   initRevealScroll(container);
 
-  // ST.refresh() and lenis.resize() are NOT called here.
-  // For navigations: called once in barba enter() before the animation.
-  // For first load (once()): called synchronously in the once() hook.
   if (!ctx.deferLenisStart) {
     startLenis();
   }
