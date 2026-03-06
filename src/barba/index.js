@@ -122,6 +122,11 @@ export function initBarba({ initContainer }) {
         },
 
         async afterEnter(data) {
+          // Outgoing container was removed synchronously in leave().
+          // Safe to reinit IX2 now — it won't affect outgoing visuals.
+          reinitWebflowIX2();
+          resetWCurrent();
+
           _postTransitionCallbacks = [];
           await initContainer(data?.next?.container || document, {
             isFirstLoad: false,
@@ -236,20 +241,24 @@ export function initBarba({ initContainer }) {
           const container = data?.next?.container;
           if (!container) return;
 
-          // Clear stale IX2 vars; sync page identity.
+          // ── Step A: Clear stale IX2 CSS vars and sync page identity ──────────
+          // reinitWebflowIX2 is intentionally NOT called here — calling it
+          // while the leave animation is still running (sync:true, concurrent)
+          // causes ix2.init() to reset GSAP inline transforms on elements in
+          // the outgoing container (e.g. the home hero video), creating a
+          // visible jump. It is called AFTER the animation completes (below),
+          // once the outgoing container has been removed from the DOM.
           resetIX2CSSVars();
           syncWebflowPageIdFromNextHtml(data?.next?.html || "");
-          reinitWebflowIX2();
-
-          // resetWCurrent MUST run after reinitWebflowIX2 — IX2.ready() can
-          // clear .w--current. initCmsNext (inside initContainer) reads it.
+          // No Webflow.ready() here so there are no async Webflow callbacks
+          // that could interfere with initCmsNext's .w--current filtering.
           resetWCurrent();
 
           _postTransitionCallbacks = [];
 
-          // Init all page scripts while container is untransformed.
-          // ST trigger positions, pin spacers, CMS mutations — all measured
-          // against the final settled layout at scroll = 0.
+          // ── Step B: Init all page scripts ─────────────────────────────────
+          // Container is at scroll=0, untransformed, in its final DOM position.
+          // ST positions, pin spacers, CMS mutations — all measured correctly.
           await initContainer(container, {
             isFirstLoad: false,
             isNavigation: true,
@@ -257,42 +266,41 @@ export function initBarba({ initContainer }) {
             onPostTransition: (fn) => _postTransitionCallbacks.push(fn)
           });
 
-          // Fire onPostTransition callbacks now — container is untransformed,
-          // so pinned ST pin spacers calculate correctly.
-          // Previously deferred to after() to avoid transform-ancestor issues;
-          // with the fixed-wrapper approach below that is no longer needed.
           if (_postTransitionCallbacks.length) {
             _postTransitionCallbacks.forEach((fn) => { try { fn(); } catch (_) {} });
             _postTransitionCallbacks = [];
           }
 
-          // Single refresh + resize — scroll = 0, no animation running, no transforms.
-          // This is the only measurement cycle for this navigation; after() does none.
+          // ── Step C: Preliminary refresh ────────────────────────────────────
+          // IX2 initial states are not yet applied (reinitWebflowIX2 deferred),
+          // but this gives scroll-1 and other STs reasonable positions for the
+          // duration of the animation. The authoritative refresh fires below.
           try { window.ScrollTrigger?.refresh(); } catch (_) {}
           try { window.lenis?.resize?.(); } catch (_) {}
 
-          // Run the slide-in animation.
-          // The fixed wrapper isolates the container from native scroll compositing:
-          // without it, scroll momentum on short pages (Work) adds on top of the
-          // GSAP transform and makes the animation non-deterministic ("tug" effect).
-          const wrapper = document.createElement("div");
-          wrapper.style.cssText =
-            "position:fixed;inset:0;overflow:hidden;z-index:2;pointer-events:none;";
-          container.before(wrapper);
-          wrapper.appendChild(container);
-          container.style.cssText =
-            "position:absolute;top:0;left:0;width:100%;pointer-events:auto;";
-
+          // ── Step D: Slide-in animation ─────────────────────────────────────
+          // No fixed wrapper needed — scroll was reset to 0 in leave() before
+          // the leave animation, so there is no residual Lenis momentum to
+          // cause the non-deterministic "tug" that previously affected Work.
           await gsap.from(container, {
             y: "100vh",
             duration: VT_DURATION,
             ease: VT_EASE
           });
 
-          // Restore container to normal document flow; clear wrapper-phase styles.
-          wrapper.before(container);
-          wrapper.remove();
-          container.style.cssText = "";
+          // ── Step E: Post-animation reinit ──────────────────────────────────
+          // By the time the enter animation completes (~VT_DURATION), the leave
+          // animation has also finished and runOutgoingCleanup() has removed the
+          // outgoing container. IX2 reinit is now safe — it only affects the
+          // incoming container and the rest of the document.
+          reinitWebflowIX2();
+          // IX2.ready() can clear .w--current; restore it immediately.
+          resetWCurrent();
+          // Authoritative refresh — IX2 initial states now applied, positions
+          // and pin spacers correct. invalidateOnRefresh STs (project footer)
+          // will recalculate here regardless of when they were first created.
+          try { window.ScrollTrigger?.refresh(); } catch (_) {}
+          try { window.lenis?.resize?.(); } catch (_) {}
         },
 
         async once(data) {
