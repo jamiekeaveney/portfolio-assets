@@ -176,66 +176,51 @@ html.is-transitioning {
   overflow: hidden;
 }
 
-/* ==========================================================================
-   Page overlay — darkens outgoing page during slide leave animation
-   ========================================================================== */
 
-/* Injected as the first child of the outgoing Barba container by
-   ensureOverlay() in transition-lock.js. Sits between the outgoing page
-   content and the incoming page, darkening the outgoing page without
-   requiring opacity changes on every individual child element.
 
-   Initial state is opacity:0 (set by JS via gsap.set). GSAP animates it
-   to opacity:0.6 during the leave animation. */
-.page-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  background: #000;
-  opacity: 0;
-  pointer-events: none;
-  /* No transition here — GSAP owns the animation */
-}
 
-/* ==========================================================================
-   Transition handoff overlay — proxy elements for p2p visual handoff
-   ========================================================================== */
 
-/* Root container for all handoff proxy elements. Created and destroyed by
-   createProjectNextHandoff(). Fixed-position, above everything, no scroll,
-   no pointer events (JS handles click-through for the duration). */
+
+
+
+
 [data-transition-overlay-root] {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: 99999;
   pointer-events: none;
-  /* overflow:visible so proxies that start/end outside the viewport are not
-     clipped during the handoff animation */
   overflow: visible;
 }
 
-/* Media proxy: a div with background-image mimicking the source thumbnail.
-   Border-radius and overflow:hidden are applied inline by JS (copied from the
-   source element's computed style). No additional CSS needed here. */
-
-/* Title proxy: a div containing a clone of the source title element.
-   No overflow:hidden on the outer proxy (would clip descenders like "G").
-   Typography and padding are copied inline by JS from computed styles. */
-
-/* Both proxy types are fixed-position with explicit left/top/width/height
-   set by JS via GSAP. These rules ensure GPU compositing. */
-[data-transition-overlay-root] > * {
-  will-change: left, top, width, height, opacity;
-  -webkit-backface-visibility: hidden;
+[data-transition-proxy] {
+  position: fixed;
+  margin: 0;
+  pointer-events: none;
+  will-change: transform, width, height, opacity, border-radius, left, top;
+  transform-origin: top left;
   backface-visibility: hidden;
 }
 
-/* ==========================================================================
-   Hidden hero elements during p2p handoff
-   ========================================================================== */
+[data-transition-proxy="media"] {
+  overflow: hidden;
+}
 
-/* Target hero elements (media, title-wrap, title) are hidden via
-   gsap.set(el, { opacity: 0 }) when the handoff begins, then faded back in
-   at 75% of the animation duration. No CSS is strictly required here, but
-   these selectors document the expected initial-state reset path:
-   gsap.set(el, { clearProps: "opacity" }) in the final cleanup restores them. */
+[data-transition-proxy="media"] > img,
+[data-transition-proxy="media"] > video,
+[data-transition-proxy="media"] .video,
+[data-transition-proxy="media"] picture {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+[data-transition-proxy="title-wrap"],
+[data-transition-proxy="title"] {
+  overflow: visible;
+}
+
+[data-transition-hidden-target] {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}

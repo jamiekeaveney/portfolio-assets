@@ -1,36 +1,20 @@
-// src/features/project-next-pin.js
-// Pins the project footer and scrubs a progress counter as the user scrolls.
-// When progress reaches 100 %, navigates to the next project via Barba
-// (never via location.href / _bypassBarba).
-//
-// Source element bounds are captured at trigger time — BEFORE the scroll
-// position resets in leave() — so the handoff overlay can read them safely
-// even after the outgoing container has been repositioned.
-//
-// The shared state object is initialised here (and re-used by
-// project-next-handoff.js and barba/index.js).
-
 import { addCleanup } from "../core/cleanup.js";
-
-// ── Shared transition state ──────────────────────────────────────────────────
 
 if (!window.__projectNextTransition) {
   window.__projectNextTransition = {
-    href:                  null,
-    sourceThumbEl:         null,
-    sourceThumbBounds:     null,
-    sourceTitleWrapEl:     null,
+    href: null,
+    sourceThumbEl: null,
+    sourceThumbBounds: null,
+    sourceTitleWrapEl: null,
     sourceTitleWrapBounds: null,
-    sourceTitleEl:         null,
-    sourceTitleBounds:     null,
+    sourceTitleEl: null,
+    sourceTitleBounds: null,
     initiatedFromPinnedNext: false,
-    inProgress:            false
+    inProgress: false
   };
 }
 
-// ── initProjectNextPin ───────────────────────────────────────────────────────
-
-export function initProjectNextPin(container, options = {}) {
+export function initProjectNextPin(container) {
   if (!window.gsap || !window.ScrollTrigger) return;
 
   window.gsap.registerPlugin(window.ScrollTrigger);
@@ -45,29 +29,30 @@ export function initProjectNextPin(container, options = {}) {
     const counters = container.querySelectorAll(".counter");
 
     let tween;
-    let ended = false, started = false, lastTxt = "";
-
-    // waitAborted prevents rAF callbacks from a previous mm scope from calling
-    // createPinTrigger() after this scope has been torn down. This is the root
-    // fix for the "pin works after refresh but not on first nav" bug: without
-    // this flag, rAF polling continues across the transition and can call
-    // createPinTrigger() while the slide animation's y:100vh transform is
-    // still applied to the container, baking a wrong pin-spacer measurement.
+    let ended = false;
+    let started = false;
+    let lastTxt = "";
     let waitAborted = false;
 
-    // ── createPinTrigger ────────────────────────────────────────────────────
-    // Called once waitOne() has confirmed the CMS list contains exactly 1 item.
+    const resetUi = () => {
+      pinned.classList.remove("start-transition", "end-transition");
+      root.style.setProperty("--_feedback---footer-progress", "0");
+      counters.forEach((c) => (c.textContent = "00"));
+    };
 
     const createPinTrigger = (item) => {
+      if (!item || tween) return;
+
       const linkEl      = item.querySelector("a[href]");
       const href        = linkEl?.href;
       if (!href) return;
 
-      const thumbEl     = item.querySelector("[data-next-project-thumb]")     || null;
+      const thumbEl     = item.querySelector("[data-next-project-thumb]") || null;
       const titleWrapEl = item.querySelector("[data-next-project-title-wrap]") || null;
-      const titleEl     = item.querySelector("[data-next-project-title]")      || null;
-
+      const titleEl     = item.querySelector("[data-next-project-title]") || null;
       const H = () => window.innerHeight;
+
+      resetUi();
 
       tween = window.gsap.to(root, {
         "--_feedback---footer-progress": 1,
@@ -81,23 +66,22 @@ export function initProjectNextPin(container, options = {}) {
           invalidateOnRefresh: true,
 
           onRefresh(self) {
-            if (!ended) {
-              if (self.progress > 0.001 && !started) {
-                started = true;
-                pinned.classList.add("start-transition");
-              } else if (self.progress <= 0.001 && started) {
-                started = false;
-                pinned.classList.remove("start-transition");
-              }
+            if (ended) return;
+            if (self.progress > 0.001) {
+              started = true;
+              pinned.classList.add("start-transition");
+            } else {
+              started = false;
+              pinned.classList.remove("start-transition");
             }
           },
 
           onUpdate(self) {
-            const p     = self.progress;
+            const p = self.progress;
             const atEnd = p >= 0.999;
 
             if (!ended) {
-              if (!started && p > 0) {
+              if (!started && p > 0.001) {
                 started = true;
                 pinned.classList.add("start-transition");
               } else if (started && p <= 0.001) {
@@ -116,85 +100,77 @@ export function initProjectNextPin(container, options = {}) {
               ended = true;
               pinned.classList.add("end-transition");
 
-              // ── Capture source bounds NOW ──────────────────────────────────
-              // The pinned section is currently visible in the viewport.
-              // After barba.go() triggers leave(), scroll resets to 0 and the
-              // outgoing container is repositioned — bounds would be wrong then.
               const s = window.__projectNextTransition;
               s.href                  = href;
               s.sourceThumbEl         = thumbEl;
-              s.sourceThumbBounds     = thumbEl     ? thumbEl.getBoundingClientRect()     : null;
+              s.sourceThumbBounds     = thumbEl ? thumbEl.getBoundingClientRect() : null;
               s.sourceTitleWrapEl     = titleWrapEl;
               s.sourceTitleWrapBounds = titleWrapEl ? titleWrapEl.getBoundingClientRect() : null;
               s.sourceTitleEl         = titleEl;
-              s.sourceTitleBounds     = titleEl     ? titleEl.getBoundingClientRect()     : null;
+              s.sourceTitleBounds     = titleEl ? titleEl.getBoundingClientRect() : null;
               s.initiatedFromPinnedNext = true;
               s.inProgress            = true;
 
-              // Lock native scroll immediately; Lenis will be stopped by the
-              // global before() hook when barba.go() fires ~50 ms later.
-              root.style.overflow         = "hidden";
+              root.style.overflow = "hidden";
               document.body.style.overflow = "hidden";
 
-              setTimeout(() => {
+              requestAnimationFrame(() => {
                 if (window.barba) {
                   window.barba.go(href);
                 } else {
-                  // Safety fallback — should never be needed in production.
                   location.href = href;
                 }
-              }, 50);
+              });
             }
           }
         }
       });
 
-      // Refresh after creating the pin so the pin spacer is included in
-      // Lenis's scroll extent immediately.
-      try { window.ScrollTrigger?.refresh(); } catch (_) {}
-      try { window.lenis?.resize?.();        } catch (_) {}
+      try { window.ScrollTrigger.refresh(); } catch (_) {}
+      try { window.lenis?.resize?.(); } catch (_) {}
     };
 
-    // ── waitOne ─────────────────────────────────────────────────────────────
-    // Poll (rAF) until initCmsNext has reduced the CMS list to exactly 1 item.
-    // Guards against any jQuery/Webflow settling that hasn't completed yet.
+    const waitOne = (tries = 240) => {
+      if (waitAborted) return;
 
-    const waitOne = (tries = 200) => {
-      if (waitAborted) return; // mm scope torn down — do not proceed
-      const comp = container.querySelector("[tr-cmsnext-element='component']");
+      const comp =
+        pinned.querySelector("[tr-cmsnext-element='component']") ||
+        container.querySelector(".pinned-section [tr-cmsnext-element='component']");
+
       if (!comp) {
         if (tries > 0) requestAnimationFrame(() => waitOne(tries - 1));
         return;
       }
+
       const items = comp.querySelectorAll(".w-dyn-item");
-      if (items.length === 1) { createPinTrigger(items[0]); return; }
+
+      if (items.length === 1) {
+        createPinTrigger(items[0]);
+        return;
+      }
+
       if (tries > 0) requestAnimationFrame(() => waitOne(tries - 1));
     };
 
+    resetUi();
     waitOne();
 
-    // ── mm cleanup ──────────────────────────────────────────────────────────
     return () => {
-      // Abort any pending rAF poll immediately so it cannot create a stale ST.
       waitAborted = true;
-
-      ended   = false;
+      ended = false;
       started = false;
       lastTxt = "";
+      resetUi();
 
-      pinned.classList.remove("start-transition", "end-transition");
-
-      // Only restore overflow here when NOT mid-transition. During an active
-      // transition forceUnlockTransition() in the global after() hook owns
-      // the unlock lifecycle; restoring here would unlock scroll prematurely.
       if (!window.__projectNextTransition?.inProgress) {
-        root.style.overflow          = "";
+        root.style.overflow = "";
         document.body.style.overflow = "";
         window.lenis?.start?.();
       }
 
       if (tween?.scrollTrigger) tween.scrollTrigger.kill(true);
       tween?.kill();
+      tween = null;
     };
   });
 

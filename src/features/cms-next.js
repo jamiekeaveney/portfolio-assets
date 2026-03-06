@@ -1,23 +1,27 @@
-// src/features/cms-next.js
-// Reduces a Webflow CMS list to show only the next (or previous) project item.
-// Extracted from src/pages/project.js — logic is identical, only the module
-// boundary has changed.
-//
-// Supported attributes on [tr-cmsnext-element="component"]:
-//   tr-cmsnext-loop="true"       — wrap around at the end/start
-//   tr-cmsnext-showprev="true"   — show previous item instead of next
-//   tr-cmsnext-showall="true"    — keep all items, just add is-prev/current/next classes
-//   tr-cmsnext-hideempty="true"  — hide the component wrapper when no item is found
-
 import { addCleanup } from "../core/cleanup.js";
 
-export function initCmsNext(container) {
+function normalisePath(path) {
+  return String(path || "/").replace(/\/$/, "") || "/";
+}
+
+function hrefMatchesPath(href, currentPath) {
+  if (!href) return false;
+  try {
+    const url = new URL(href, window.location.origin);
+    return normalisePath(url.pathname) === normalisePath(currentPath);
+  } catch (_) {
+    return false;
+  }
+}
+
+export function initCmsNext(container, currentPath = window.location.pathname) {
   if (!window.gsap || !window.$) return;
 
   const mm = window.gsap.matchMedia();
 
   mm.add("(min-width: 992px)", () => {
     const $components = window.$("[tr-cmsnext-element='component']", container);
+    const path = normalisePath(currentPath || window.location.pathname);
 
     $components.each(function () {
       const $component = window.$(this);
@@ -25,16 +29,24 @@ export function initCmsNext(container) {
       const $cmsItems  = $cmsList.children();
       const $noResult  = $component.find("[tr-cmsnext-element='no-result']");
 
-      // Snapshot original HTML once so it can be restored cleanly on mm.revert().
       if ($component.data("cmsnextOriginal") == null) {
         $component.data("cmsnextOriginal", $cmsList.html());
       }
 
-      // Find the current item by looking for Webflow's .w--current link inside.
       let $current;
       $cmsItems.each(function () {
-        if (window.$(this).find(".w--current").length) $current = window.$(this);
+        const $item = window.$(this);
+        const $link = $item.find("a[href]").first();
+        if (!$link.length) return;
+        if (hrefMatchesPath($link.attr("href"), path)) $current = $item;
       });
+
+      if (!$current?.length) {
+        $cmsItems.each(function () {
+          const $item = window.$(this);
+          if ($item.find(".w--current").length) $current = $item;
+        });
+      }
 
       let $next = $current?.next();
       let $prev = $current?.prev();
@@ -54,19 +66,23 @@ export function initCmsNext(container) {
       } else {
         $cmsItems.not($display).remove();
         if (!$display?.length) $noResult.show();
-        if (!$display?.length && $component.attr("tr-cmsnext-hideempty") === "true") {
+        if (
+          !$display?.length &&
+          $component.attr("tr-cmsnext-hideempty") === "true"
+        ) {
           $component.hide();
         }
       }
     });
 
-    // Cleanup: restore original CMS HTML so Barba's fresh fetch has correct markup.
     return () => {
       window.$("[tr-cmsnext-element='component']", container).each(function () {
         const $component = window.$(this);
         const $cmsList   = $component.find(".w-dyn-items").first();
         const original   = $component.data("cmsnextOriginal");
+
         if (original != null) $cmsList.html(original);
+
         $component.show();
         $component.find("[tr-cmsnext-element='no-result']").hide();
         $cmsList.find(".w-dyn-item").removeClass("is-prev is-current is-next");
