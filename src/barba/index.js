@@ -141,7 +141,6 @@ export function initBarba({ initContainer }) {
 
   bindTransitionLockSafety();
 
-  // Mark browser history nav as "fresh slide".
   window.addEventListener("popstate", () => {
     markHistoryNavigation();
   });
@@ -372,7 +371,6 @@ export function initBarba({ initContainer }) {
           const scrollY = window.scrollY || window.pageYOffset || 0;
 
           freezeStickyInContainer(data.current.container);
-
           const restoreOutgoingVars = snapshotIX2CSSVars(data.current.container);
           const runOutgoingCleanup = captureCleanups();
 

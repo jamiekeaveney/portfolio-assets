@@ -84,13 +84,14 @@ export function bindTransitionLockSafety() {
     clearHistoryNavigation();
   });
 
+  // IMPORTANT:
+  // Do NOT reset scroll or unlock here.
+  // On browser back/forward, Barba still needs the CURRENT page's real scroll
+  // position so leave() can freeze it and animate from the correct place.
   window.addEventListener("popstate", () => {
     markHistoryNavigation();
-    forceUnlockTransition();
     clearProjectNextTransition();
     clearHandoffOverlays();
-
-    try { window.scrollTo(0, 0); } catch (_) {}
   });
 }
 
