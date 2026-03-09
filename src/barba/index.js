@@ -64,11 +64,17 @@ function getNamespace(data, which = "next") {
   );
 }
 
+/**
+ * P2P only fires when the pinned-footer scroll reaches 100% and explicitly
+ * sets initiatedFromPinnedNext. Clicks on .case-link or .image-wrap.next-case,
+ * and browser back/forward, use the slide transition instead.
+ */
 function isProjectToProject(data) {
   return (
     !isHistoryNavigation() &&
     getNamespace(data, "current") === "project" &&
-    getNamespace(data, "next") === "project"
+    getNamespace(data, "next") === "project" &&
+    window.__projectNextTransition?.initiatedFromPinnedNext === true
   );
 }
 
@@ -106,29 +112,22 @@ function removeOrphanContainers(nextContainer) {
   });
 }
 
-/**
- * Returns the single shared slide overlay element, creating it once.
- * Positioned between outgoing (z-index:1) and incoming (z-index:3) containers
- * so it darkens only the outgoing page as it slides away.
- */
-function getSlideOverlay() {
-  let el = document.getElementById("barba-slide-overlay");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "barba-slide-overlay";
-    document.body.appendChild(el);
-  }
-  return el;
+function killTransitionTweens() {
+  if (!window.gsap) return;
+  document.querySelectorAll('[data-barba="container"]').forEach((el) => {
+    try { window.gsap.killTweensOf(el); } catch (_) {}
+    try {
+      const mw = el.querySelector(".main-wrapper");
+      if (mw) window.gsap.killTweensOf(mw);
+    } catch (_) {}
+  });
 }
 
-function resetSlideOverlay() {
-  const el = document.getElementById("barba-slide-overlay");
-  if (!el) return;
-  if (window.gsap) {
-    window.gsap.set(el, { opacity: 0, display: "none" });
-  } else {
-    el.style.opacity = "0";
-    el.style.display = "none";
+function resolveCSSVar(name) {
+  try {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || null;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -162,6 +161,9 @@ export function initBarba({ initContainer }) {
   try { history.scrollRestoration = "manual"; } catch (_) {}
 
   window.barba.hooks.before((data) => {
+    // Kill any leftover tweens from an interrupted transition
+    killTransitionTweens();
+
     document.documentElement.classList.add("is-transitioning");
     resetWCurrent(data?.next?.url?.path);
 
@@ -178,7 +180,6 @@ export function initBarba({ initContainer }) {
   window.barba.hooks.after((data) => {
     document.documentElement.classList.remove("is-transitioning");
 
-    resetSlideOverlay();
     clearAllContainerProps();
     removeOrphanContainers(data?.next?.container);
 
@@ -197,12 +198,16 @@ export function initBarba({ initContainer }) {
   });
 
   window.barba.init({
-    preventRunning: true,
+    // preventRunning: false lets browser back/forward interrupt an in-progress
+    // transition instead of being silently blocked, which causes URL/page mismatch.
+    // killTransitionTweens() in before() and try/finally in every enter() ensure
+    // clean state regardless of how a transition ends.
+    preventRunning: false,
     prevent: preventBarba,
 
     transitions: [
 
-      // ── Project → Project ──────────────────────────────────────────────────
+      // ── Project → Project (pinned footer scroll only) ──────────────────────
       {
         name: "project-to-project",
         sync: true,
@@ -239,6 +244,12 @@ export function initBarba({ initContainer }) {
 
           data.current.container.style.pointerEvents = "none";
           data.next.container.style.pointerEvents = "none";
+
+          // Fade out all content — proxies handle the hero handoff visually
+          const mainWrapper = data.current.container.querySelector(".main-wrapper");
+          if (mainWrapper) {
+            gsap.to(mainWrapper, { opacity: 0, duration: 0.25, ease: "power1.out" });
+          }
 
           runOutgoingCleanup();
         },
@@ -359,7 +370,7 @@ export function initBarba({ initContainer }) {
         }
       },
 
-      // ── Slide (default) ────────────────────────────────────────────────────
+      // ── Slide (default for all other navigations) ──────────────────────────
       {
         name: "slide",
         sync: true,
@@ -383,7 +394,6 @@ export function initBarba({ initContainer }) {
             return;
           }
 
-          // Freeze outgoing page at current scroll position
           gsap.set(data.current.container, {
             position: "fixed",
             top: -scrollY,
@@ -395,21 +405,29 @@ export function initBarba({ initContainer }) {
             y: 0
           });
 
-          // Global overlay (z-index:2) sits between outgoing (1) and incoming (3)
-          const overlay = getSlideOverlay();
-          gsap.set(overlay, { display: "block", opacity: 0 });
-
           data.current.container.style.pointerEvents = "none";
           data.next.container.style.pointerEvents = "none";
 
-          // Animate: outgoing slides up, overlay fades in to darken it
           const leaveTl = gsap.timeline();
 
-          leaveTl.to(overlay, {
-            opacity: 0.5,
-            duration: VT_DURATION,
-            ease: VT_EASE
-          }, 0);
+          // Background shifts to accent colour; content fades to 50% opacity
+          const accentBg = resolveCSSVar("--_theme---swatches--cta-card");
+          if (accentBg) {
+            leaveTl.to(data.current.container, {
+              backgroundColor: accentBg,
+              duration: 0.2,
+              ease: "none"
+            }, 0);
+          }
+
+          const mainWrapper = data.current.container.querySelector(".main-wrapper");
+          if (mainWrapper) {
+            leaveTl.to(mainWrapper, {
+              opacity: 0.5,
+              duration: 0.25,
+              ease: "power1.out"
+            }, 0);
+          }
 
           leaveTl.to(data.current.container, {
             y: "-25vh",
@@ -429,7 +447,7 @@ export function initBarba({ initContainer }) {
           const container = data?.next?.container;
           if (!container) return;
 
-          // Hide incoming while it initializes so it doesn't cover the leave animation
+          // Hide incoming while it initialises so the leave animation is fully visible
           gsap.set(container, { autoAlpha: 0 });
 
           try {
@@ -449,7 +467,7 @@ export function initBarba({ initContainer }) {
               onPostTransition: (fn) => _postTransitionCallbacks.push(fn)
             });
 
-            // Position incoming below viewport, then slide it up
+            // Slide the incoming page up from below the viewport
             gsap.set(container, {
               position: "fixed",
               top: 0,
@@ -457,7 +475,7 @@ export function initBarba({ initContainer }) {
               width: "100%",
               height: "100vh",
               y: "100vh",
-              zIndex: 3,
+              zIndex: 2,
               autoAlpha: 1,
               pointerEvents: "none"
             });

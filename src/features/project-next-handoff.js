@@ -171,10 +171,7 @@ function buildTitleProxy(sourceEl, bounds) {
   clone.style.display = "block";
 
   applyFixedBounds(proxy, bounds);
-
-  // Give descenders extra room so letters like g/y/j never clip.
   proxy.style.overflow = "visible";
-  proxy.style.height = `${bounds.height + 12}px`;
 
   proxy.appendChild(clone);
   return proxy;
@@ -303,7 +300,7 @@ export function createProjectNextHandoff(data) {
         left: tgtTitleBounds.left,
         top: tgtTitleBounds.top,
         width: tgtTitleBounds.width,
-        height: tgtTitleBounds.height + 12,
+        height: tgtTitleBounds.height,
         duration: HANDOFF_DURATION,
         ease: HANDOFF_EASE,
         immediateRender: false,

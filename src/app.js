@@ -1,6 +1,6 @@
 import { onReady } from "./core/ready.js";
 import { runCleanups } from "./core/cleanup.js";
-import { createLenis, startLenis } from "./core/lenis.js";
+import { createLenis, startLenis, stopLenis } from "./core/lenis.js";
 import { initNav } from "./core/nav.js";
 
 import { initSplit } from "./features/split.js";
@@ -26,7 +26,11 @@ export async function initContainer(container, ctx = {}) {
   runCleanups();
   createLenis();
 
-  if (!ctx.deferLenisStart) {
+  if (ctx.deferLenisStart) {
+    // Lenis is created in a running state by default — explicitly stop it
+    // so scroll is locked until the page and transition are ready.
+    stopLenis();
+  } else {
     startLenis();
   }
 

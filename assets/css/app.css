@@ -173,18 +173,6 @@ html.is-transitioning [data-barba="container"] {
   backface-visibility: hidden;
 }
 
-/* Slide transition overlay — sits between outgoing (z:1) and incoming (z:3) */
-#barba-slide-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 2;
-  background: #000;
-  opacity: 0;
-  display: none;
-  pointer-events: none;
-  will-change: opacity;
-}
-
 /* Project-to-project handoff overlay root */
 [data-transition-overlay-root] {
   position: fixed;
