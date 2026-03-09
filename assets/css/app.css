@@ -184,6 +184,15 @@ html.is-transitioning {
 
 
 
+html.is-transitioning,
+html.is-transitioning body {
+  overflow: hidden !important;
+}
+
+[data-barba="container"] {
+  isolation: isolate;
+}
+
 .page-overlay {
   position: absolute;
   inset: 0;
@@ -234,9 +243,6 @@ html.is-transitioning {
   visibility: hidden !important;
 }
 
-[data-barba="container"] {
-  isolation: isolate;
-}
 
 
 

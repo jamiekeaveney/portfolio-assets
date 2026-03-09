@@ -84,9 +84,9 @@ export function bindTransitionLockSafety() {
   });
 
   // IMPORTANT:
-  // On browser back/forward, DO NOT unlock or scroll-reset here.
-  // Barba still needs the current page's real scroll position to capture
-  // the outgoing page correctly for the leave/parallax animation.
+  // On browser history nav, do NOT unlock or scroll-reset here.
+  // Barba still needs the CURRENT page's real scroll position so leave()
+  // can freeze and animate from the correct place.
   window.addEventListener("popstate", () => {
     markHistoryNavigation();
     clearProjectNextTransition();
