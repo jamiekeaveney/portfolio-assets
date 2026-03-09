@@ -1,8 +1,10 @@
 import { stopLenis, startLenis } from "../core/lenis.js";
 
 let _lockDepth = 0;
-const LOCK_CLASS = "is-transitioning";
 let _safetyBound = false;
+let _historyNavigation = false;
+
+const LOCK_CLASS = "is-transitioning";
 
 export function lockTransition() {
   _lockDepth++;
@@ -59,6 +61,18 @@ export function resetOverlay(container) {
   }
 }
 
+export function markHistoryNavigation() {
+  _historyNavigation = true;
+}
+
+export function isHistoryNavigation() {
+  return _historyNavigation === true;
+}
+
+export function clearHistoryNavigation() {
+  _historyNavigation = false;
+}
+
 export function bindTransitionLockSafety() {
   if (_safetyBound) return;
   _safetyBound = true;
@@ -67,10 +81,11 @@ export function bindTransitionLockSafety() {
     forceUnlockTransition();
     clearProjectNextTransition();
     clearHandoffOverlays();
+    clearHistoryNavigation();
   });
 
   window.addEventListener("popstate", () => {
-    // Make back/forward deterministic by clearing stale lock/overlay/state.
+    markHistoryNavigation();
     forceUnlockTransition();
     clearProjectNextTransition();
     clearHandoffOverlays();

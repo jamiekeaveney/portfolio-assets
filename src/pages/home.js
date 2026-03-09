@@ -11,7 +11,13 @@ export async function initHome(container, ctx) {
   let homeStarted = false;
 
   const initScrollFeatures = () => {
-    initScroll1(container);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        initScroll1(container);
+        try { window.ScrollTrigger?.refresh(); } catch (_) {}
+        try { window.lenis?.resize?.(); } catch (_) {}
+      });
+    });
   };
 
   const startHomeNow = () => {

@@ -18,7 +18,10 @@ import {
   resetOverlay,
   clearProjectNextTransition,
   clearHandoffOverlays,
-  bindTransitionLockSafety
+  bindTransitionLockSafety,
+  markHistoryNavigation,
+  isHistoryNavigation,
+  clearHistoryNavigation
 } from "./transition-lock.js";
 import { createProjectNextHandoff } from "../features/project-next-handoff.js";
 
@@ -64,6 +67,7 @@ function getNamespace(data, which = "next") {
 
 function isProjectToProject(data) {
   return (
+    !isHistoryNavigation() &&
     getNamespace(data, "current") === "project" &&
     getNamespace(data, "next") === "project"
   );
@@ -82,11 +86,25 @@ function hardScrollReset() {
   try { window.scrollTo(0, 0); } catch (_) {}
 }
 
-function clearIncomingContainerProps(container) {
+function clearContainerProps(container) {
   if (!window.gsap || !container) return;
   window.gsap.set(container, {
     clearProps:
       "position,top,left,right,bottom,width,height,overflow,zIndex,opacity,transform,backgroundColor,pointerEvents,visibility,y"
+  });
+}
+
+function clearAllContainerProps() {
+  document.querySelectorAll('[data-barba="container"]').forEach((container) => {
+    clearContainerProps(container);
+  });
+}
+
+function removeOrphanContainers(nextContainer) {
+  document.querySelectorAll('[data-barba="container"]').forEach((container) => {
+    if (container !== nextContainer) {
+      try { container.remove(); } catch (_) {}
+    }
   });
 }
 
@@ -123,6 +141,11 @@ export function initBarba({ initContainer }) {
 
   bindTransitionLockSafety();
 
+  // Mark browser history nav as "fresh slide".
+  window.addEventListener("popstate", () => {
+    markHistoryNavigation();
+  });
+
   const preventBarba = ({ el } = {}) => {
     if (!el) return false;
     if (el.hasAttribute?.("data-barba-prevent")) return true;
@@ -150,7 +173,6 @@ export function initBarba({ initContainer }) {
     resetWCurrent(data?.next?.url?.path);
 
     _postTransitionCallbacks = [];
-
     clearHandoffOverlays();
 
     if (!isProjectToProject(data) && !window.__projectNextTransition?.inProgress) {
@@ -163,16 +185,21 @@ export function initBarba({ initContainer }) {
   window.barba.hooks.after((data) => {
     document.documentElement.classList.remove("is-transitioning");
 
-    clearIncomingContainerProps(data?.next?.container);
+    clearAllContainerProps();
+    removeOrphanContainers(data?.next?.container);
 
     forceUnlockTransition();
     hardScrollReset();
 
     clearProjectNextTransition();
     clearHandoffOverlays();
+    clearHistoryNavigation();
 
     resetWCurrent();
     clearFromPanel();
+
+    try { window.ScrollTrigger?.refresh(); } catch (_) {}
+    try { window.lenis?.resize?.(); } catch (_) {}
   });
 
   window.barba.init({
@@ -219,10 +246,6 @@ export function initBarba({ initContainer }) {
           data.next.container.style.pointerEvents = "none";
 
           hardScrollReset();
-
-          // IMPORTANT:
-          // No opacity-out, no overlay fade, no hidden-out animation.
-          // The handoff proxy owns the visual transition.
           runOutgoingCleanup();
         },
 
@@ -274,7 +297,7 @@ export function initBarba({ initContainer }) {
           readyWebflow();
           resetWCurrent();
 
-          clearIncomingContainerProps(container);
+          clearContainerProps(container);
           container.style.pointerEvents = "";
 
           hardScrollReset();
@@ -349,10 +372,13 @@ export function initBarba({ initContainer }) {
           const scrollY = window.scrollY || window.pageYOffset || 0;
 
           freezeStickyInContainer(data.current.container);
+
           const restoreOutgoingVars = snapshotIX2CSSVars(data.current.container);
           const runOutgoingCleanup = captureCleanups();
+
           killAllScrollTriggers();
           restoreOutgoingVars();
+
           destroyPage(getNamespace(data, "current"));
 
           if (!gsap) {
@@ -371,7 +397,7 @@ export function initBarba({ initContainer }) {
           });
 
           const overlay = ensureOverlay(data.current.container);
-          if (overlay) resetOverlay(data.current.container);
+          resetOverlay(data.current.container);
 
           gsap.set(data.next.container, { zIndex: 2 });
           data.current.container.style.pointerEvents = "none";
@@ -397,7 +423,6 @@ export function initBarba({ initContainer }) {
           }, 0);
 
           await leaveTl;
-
           runOutgoingCleanup();
         },
 
@@ -436,17 +461,14 @@ export function initBarba({ initContainer }) {
             ease: VT_EASE
           });
 
-          destroyAndInitIX2();
+          reinitWebflowIX2();
           resetWCurrent();
 
           try { window.ScrollTrigger?.refresh(); } catch (_) {}
 
           flushPostTransition();
 
-          readyWebflow();
-          resetWCurrent();
-
-          clearIncomingContainerProps(container);
+          clearContainerProps(container);
 
           hardScrollReset();
           unlockTransition();
