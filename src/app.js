@@ -56,10 +56,6 @@ export async function initContainer(container, ctx = {}) {
 
   initTextScroll(container);
   initRevealScroll(container);
-
-  if (!ctx.deferLenisStart) {
-    startLenis();
-  }
 }
 
 onReady(function () {

@@ -184,11 +184,6 @@ html.is-transitioning {
 
 
 
-html.is-transitioning,
-html.is-transitioning body {
-  overflow: hidden !important;
-}
-
 [data-barba="container"] {
   isolation: isolate;
 }

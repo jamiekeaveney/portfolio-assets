@@ -1,4 +1,5 @@
 import { addCleanup } from "../core/cleanup.js";
+import { startLenis } from "../core/lenis.js";
 
 if (!window.__projectNextTransition) {
   window.__projectNextTransition = {
@@ -197,7 +198,7 @@ export function initProjectNextPin(container) {
       if (!window.__projectNextTransition?.inProgress) {
         root.style.overflow = "";
         document.body.style.overflow = "";
-        try { window.lenis?.start?.(); } catch (_) {}
+        startLenis();
       }
     };
   });

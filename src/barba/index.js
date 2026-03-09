@@ -2,7 +2,6 @@ import { runCleanups, captureCleanups } from "../core/cleanup.js";
 import { killAllScrollTriggers } from "../core/scrolltrigger.js";
 import {
   syncWebflowPageIdFromNextHtml,
-  reinitWebflowIX2,
   destroyAndInitIX2,
   readyWebflow,
   resetWCurrent
@@ -19,7 +18,6 @@ import {
   clearProjectNextTransition,
   clearHandoffOverlays,
   bindTransitionLockSafety,
-  markHistoryNavigation,
   isHistoryNavigation,
   clearHistoryNavigation
 } from "./transition-lock.js";
@@ -140,10 +138,6 @@ export function initBarba({ initContainer }) {
   if (!window.barba) return console.warn("Barba not loaded.");
 
   bindTransitionLockSafety();
-
-  window.addEventListener("popstate", () => {
-    markHistoryNavigation();
-  });
 
   const preventBarba = ({ el } = {}) => {
     if (!el) return false;
@@ -459,7 +453,7 @@ export function initBarba({ initContainer }) {
             ease: VT_EASE
           });
 
-          reinitWebflowIX2();
+          destroyAndInitIX2();
           resetWCurrent();
 
           try { window.ScrollTrigger?.refresh(); } catch (_) {}
@@ -472,6 +466,9 @@ export function initBarba({ initContainer }) {
           unlockTransition();
 
           try { window.lenis?.resize?.(); } catch (_) {}
+
+          readyWebflow();
+          resetWCurrent();
         },
 
         async once(data) {
