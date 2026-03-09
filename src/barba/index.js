@@ -244,7 +244,9 @@ export function initBarba({ initContainer }) {
           data.current.container.style.pointerEvents = "none";
           data.next.container.style.pointerEvents = "none";
 
-          hardScrollReset();
+          // IMPORTANT:
+          // Do NOT hard-reset scroll here for history/project leave.
+          // We want the outgoing page to preserve its real current scroll position.
           runOutgoingCleanup();
         },
 
@@ -327,7 +329,6 @@ export function initBarba({ initContainer }) {
 
         leave(data) {
           closeNav();
-          hardScrollReset();
           runCleanups();
           killAllScrollTriggers();
           destroyPage(getNamespace(data, "current"));
@@ -391,7 +392,8 @@ export function initBarba({ initContainer }) {
             width: "100%",
             height: "auto",
             zIndex: 1,
-            opacity: 1
+            opacity: 1,
+            y: 0
           });
 
           const overlay = ensureOverlay(data.current.container);
@@ -400,8 +402,6 @@ export function initBarba({ initContainer }) {
           gsap.set(data.next.container, { zIndex: 2 });
           data.current.container.style.pointerEvents = "none";
           data.next.container.style.pointerEvents = "none";
-
-          hardScrollReset();
 
           const leaveTl = gsap.timeline();
 

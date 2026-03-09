@@ -187,7 +187,7 @@ html.is-transitioning {
 .page-overlay {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 999;
   pointer-events: none;
   background: rgba(0, 0, 0, 1);
   opacity: 0;

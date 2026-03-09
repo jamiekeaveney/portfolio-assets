@@ -33,7 +33,6 @@ function _doUnlock() {
   document.body.style.overflow = "";
   document.documentElement.classList.remove(LOCK_CLASS);
 
-  try { window.scrollTo(0, 0); } catch (_) {}
   startLenis();
 }
 
@@ -85,9 +84,9 @@ export function bindTransitionLockSafety() {
   });
 
   // IMPORTANT:
-  // Do NOT reset scroll or unlock here.
-  // On browser back/forward, Barba still needs the CURRENT page's real scroll
-  // position so leave() can freeze it and animate from the correct place.
+  // On browser history nav we ONLY mark the event and clear stale handoff state.
+  // We do NOT unlock or scrollTo(0) here, because Barba still needs the current
+  // page's real scroll position for the outgoing parallax/freeze logic.
   window.addEventListener("popstate", () => {
     markHistoryNavigation();
     clearProjectNextTransition();

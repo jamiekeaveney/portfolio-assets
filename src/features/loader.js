@@ -1,4 +1,4 @@
-// src/features/loader.js
+import { stopLenis, startLenis } from "../core/lenis.js";
 
 const FADE_DURATION = 0.25;
 
@@ -31,7 +31,10 @@ function onLast(el, sel) {
     const items = el.querySelectorAll(sel);
     if (!items.length) return res();
     const l = items[items.length - 1];
-    l.addEventListener("animationend", function h() { l.removeEventListener("animationend", h); res(); });
+    l.addEventListener("animationend", function h() {
+      l.removeEventListener("animationend", h);
+      res();
+    });
   });
 }
 
@@ -65,32 +68,58 @@ async function exitNum(e) {
 export function loaderShow() {
   const e = dom();
   if (!e) return Promise.resolve();
+
+  stopLenis();
+  document.documentElement.style.overflow = "hidden";
+  document.body.style.overflow = "hidden";
+
   const g = window.gsap;
   e.top.innerHTML = mkDigs(0);
   e.bot.innerHTML = "";
   e.bar.style.width = "0%";
+
   if (!g) {
-    Object.assign(e.wrap.style, { display: "block", pointerEvents: "auto", opacity: "1" });
+    Object.assign(e.wrap.style, {
+      display: "block",
+      pointerEvents: "auto",
+      opacity: "1"
+    });
     posY(e, 0);
     return Promise.resolve();
   }
+
   g.killTweensOf(e.wrap);
   g.set(e.wrap, { display: "block", pointerEvents: "auto", autoAlpha: 1 });
+
   e.block.style.transition = "none";
   e.bar.style.transition = "none";
   posY(e, 0);
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    e.block.style.transition = "";
-    e.bar.style.transition = "";
-  }));
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      e.block.style.transition = "";
+      e.bar.style.transition = "";
+    });
+  });
+
   return Promise.resolve();
 }
 
 export function loaderHide() {
   const e = dom();
+
+  document.documentElement.style.overflow = "";
+  document.body.style.overflow = "";
+  startLenis();
+
   if (!e) return Promise.resolve();
+
   const g = window.gsap;
-  if (!g) { e.wrap.style.cssText = "display:none;pointer-events:none;opacity:0"; return Promise.resolve(); }
+  if (!g) {
+    e.wrap.style.cssText = "display:none;pointer-events:none;opacity:0";
+    return Promise.resolve();
+  }
+
   g.set(e.wrap, { display: "none", pointerEvents: "none", autoAlpha: 0 });
   e.block.style.transition = "";
   e.block.style.transform = "";
@@ -104,12 +133,16 @@ export function loaderHide() {
 export async function loaderProgressTo({ onRevealStart } = {}) {
   const e = dom();
   if (!e) return;
+
   const g = window.gsap;
   const steps = seq();
-  if (!g) { e.top.innerHTML = mkDigs(100); posY(e, 100); return; }
+  if (!g) {
+    e.top.innerHTML = mkDigs(100);
+    posY(e, 100);
+    return;
+  }
 
   await wait(300);
-
   await flipNum(e, steps[1]);
   await wait(20);
   await flipNum(e, steps[2]);
@@ -125,11 +158,18 @@ export async function loaderProgressTo({ onRevealStart } = {}) {
 export function loaderOutro() {
   const e = dom();
   if (!e) return Promise.resolve();
+
   const g = window.gsap;
   if (!g) return new Promise((r) => setTimeout(r, FADE_DURATION * 1000));
+
   const current = parseFloat(getComputedStyle(e.wrap).opacity);
   if (current <= 0.01) return Promise.resolve();
-  return g.to(e.wrap, { autoAlpha: 0, duration: 0.15, ease: "power1.out" }).then(() => {});
+
+  return g.to(e.wrap, {
+    autoAlpha: 0,
+    duration: 0.15,
+    ease: "power1.out"
+  }).then(() => {});
 }
 
 export async function runLoader(duration = 5.0, _container = document, opts = {}) {
@@ -148,6 +188,8 @@ addEventListener("resize", () => {
     const n = parseInt(e.top.textContent) || 0;
     e.block.style.transition = "none";
     posY(e, n);
-    requestAnimationFrame(() => { e.block.style.transition = ""; });
+    requestAnimationFrame(() => {
+      e.block.style.transition = "";
+    });
   });
 });
