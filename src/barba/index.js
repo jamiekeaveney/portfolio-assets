@@ -1,5 +1,6 @@
 import { runCleanups, captureCleanups } from "../core/cleanup.js";
 import { killAllScrollTriggers } from "../core/scrolltrigger.js";
+import { startLenis } from "../core/lenis.js";
 import {
   syncWebflowPageIdFromNextHtml,
   destroyAndInitIX2,
@@ -13,8 +14,6 @@ import {
   lockTransition,
   unlockTransition,
   forceUnlockTransition,
-  ensureOverlay,
-  resetOverlay,
   clearProjectNextTransition,
   clearHandoffOverlays,
   bindTransitionLockSafety,
@@ -41,6 +40,8 @@ if (!window.__projectNextTransition) {
 }
 
 let _postTransitionCallbacks = [];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function resetIX2CSSVars() {
   [document.documentElement, document.body].forEach((el) => {
@@ -87,52 +88,51 @@ function hardScrollReset() {
 function clearContainerProps(container) {
   if (!window.gsap || !container) return;
   window.gsap.set(container, {
-    clearProps:
-      "position,top,left,right,bottom,width,height,overflow,zIndex,opacity,transform,backgroundColor,pointerEvents,visibility,y"
+    clearProps: "position,top,left,right,bottom,width,height,overflow,zIndex,opacity,transform,backgroundColor,pointerEvents,visibility,y"
   });
 }
 
 function clearAllContainerProps() {
-  document.querySelectorAll('[data-barba="container"]').forEach((container) => {
-    clearContainerProps(container);
+  document.querySelectorAll('[data-barba="container"]').forEach((el) => {
+    clearContainerProps(el);
   });
 }
 
 function removeOrphanContainers(nextContainer) {
-  document.querySelectorAll('[data-barba="container"]').forEach((container) => {
-    if (container !== nextContainer) {
-      try { container.remove(); } catch (_) {}
+  document.querySelectorAll('[data-barba="container"]').forEach((el) => {
+    if (el !== nextContainer) {
+      try { el.remove(); } catch (_) {}
     }
   });
 }
 
-function prepareIncomingContainerForSlide(container) {
-  if (!window.gsap || !container) return;
-  window.gsap.set(container, {
-    position: "fixed",
-    top: 0,
-    left: 0,
-    width: "100%",
-    height: "100vh",
-    y: "100vh",
-    zIndex: 2,
-    pointerEvents: "none"
-  });
+/**
+ * Returns the single shared slide overlay element, creating it once.
+ * Positioned between outgoing (z-index:1) and incoming (z-index:3) containers
+ * so it darkens only the outgoing page as it slides away.
+ */
+function getSlideOverlay() {
+  let el = document.getElementById("barba-slide-overlay");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "barba-slide-overlay";
+    document.body.appendChild(el);
+  }
+  return el;
 }
 
-function prepareIncomingContainerForProject(container) {
-  if (!window.gsap || !container) return;
-  window.gsap.set(container, {
-    position: "fixed",
-    top: 0,
-    left: 0,
-    width: "100%",
-    height: "100vh",
-    zIndex: 2,
-    pointerEvents: "none",
-    opacity: 1
-  });
+function resetSlideOverlay() {
+  const el = document.getElementById("barba-slide-overlay");
+  if (!el) return;
+  if (window.gsap) {
+    window.gsap.set(el, { opacity: 0, display: "none" });
+  } else {
+    el.style.opacity = "0";
+    el.style.display = "none";
+  }
 }
+
+// ─── initBarba ────────────────────────────────────────────────────────────────
 
 export function initBarba({ initContainer }) {
   if (!window.barba) return console.warn("Barba not loaded.");
@@ -178,6 +178,7 @@ export function initBarba({ initContainer }) {
   window.barba.hooks.after((data) => {
     document.documentElement.classList.remove("is-transitioning");
 
+    resetSlideOverlay();
     clearAllContainerProps();
     removeOrphanContainers(data?.next?.container);
 
@@ -200,10 +201,11 @@ export function initBarba({ initContainer }) {
     prevent: preventBarba,
 
     transitions: [
+
+      // ── Project → Project ──────────────────────────────────────────────────
       {
         name: "project-to-project",
         sync: true,
-
         custom: (data) => isProjectToProject(data),
 
         async leave(data) {
@@ -238,9 +240,6 @@ export function initBarba({ initContainer }) {
           data.current.container.style.pointerEvents = "none";
           data.next.container.style.pointerEvents = "none";
 
-          // IMPORTANT:
-          // Do NOT hard-reset scroll here for history/project leave.
-          // We want the outgoing page to preserve its real current scroll position.
           runOutgoingCleanup();
         },
 
@@ -251,54 +250,53 @@ export function initBarba({ initContainer }) {
           const container = data?.next?.container;
           if (!container) return;
 
-          hardScrollReset();
-
-          resetIX2CSSVars();
-          syncWebflowPageIdFromNextHtml(data?.next?.html || "");
-          resetWCurrent();
-
-          _postTransitionCallbacks = [];
-
-          await initContainer(container, {
-            isFirstLoad: false,
-            isNavigation: true,
-            namespace: getNamespace(data, "next"),
-            path: data?.next?.url?.path || window.location.pathname,
-            deferLenisStart: true,
-            skipAutoLoadReveals: true,
-            onPostTransition: (fn) => _postTransitionCallbacks.push(fn)
-          });
-
-          prepareIncomingContainerForProject(container);
-
-          try { window.ScrollTrigger?.refresh(); } catch (_) {}
-          try { window.lenis?.resize?.(); } catch (_) {}
-
-          const handoffTl = createProjectNextHandoff(data);
-
           try {
-            await handoffTl.play();
-          } catch (_) {
-            gsap.set(container, { clearProps: "opacity" });
+            hardScrollReset();
+            resetIX2CSSVars();
+            syncWebflowPageIdFromNextHtml(data?.next?.html || "");
+            resetWCurrent();
+
+            _postTransitionCallbacks = [];
+
+            await initContainer(container, {
+              isFirstLoad: false,
+              isNavigation: true,
+              namespace: getNamespace(data, "next"),
+              path: data?.next?.url?.path || window.location.pathname,
+              deferLenisStart: true,
+              skipAutoLoadReveals: true,
+              onPostTransition: (fn) => _postTransitionCallbacks.push(fn)
+            });
+
+            prepareIncomingContainerForProject(container);
+
+            try { window.ScrollTrigger?.refresh(); } catch (_) {}
+            try { window.lenis?.resize?.(); } catch (_) {}
+
+            const handoffTl = createProjectNextHandoff(data);
+
+            try {
+              await handoffTl.play();
+            } catch (_) {
+              gsap.set(container, { clearProps: "opacity" });
+            }
+
+            destroyAndInitIX2();
+            resetWCurrent();
+
+            try { window.ScrollTrigger?.refresh(); } catch (_) {}
+
+            flushPostTransition();
+            readyWebflow();
+            resetWCurrent();
+
+            clearContainerProps(container);
+            container.style.pointerEvents = "";
+            hardScrollReset();
+          } finally {
+            unlockTransition();
+            try { window.lenis?.resize?.(); } catch (_) {}
           }
-
-          destroyAndInitIX2();
-          resetWCurrent();
-
-          try { window.ScrollTrigger?.refresh(); } catch (_) {}
-
-          flushPostTransition();
-
-          readyWebflow();
-          resetWCurrent();
-
-          clearContainerProps(container);
-          container.style.pointerEvents = "";
-
-          hardScrollReset();
-          unlockTransition();
-
-          try { window.lenis?.resize?.(); } catch (_) {}
         },
 
         async once(data) {
@@ -307,8 +305,10 @@ export function initBarba({ initContainer }) {
             isFirstLoad: true,
             isNavigation: false,
             namespace: getNamespace(data, "next"),
-            path: data?.next?.url?.path || window.location.pathname
+            path: data?.next?.url?.path || window.location.pathname,
+            deferLenisStart: true
           });
+          startLenis();
           try { window.ScrollTrigger?.refresh(); } catch (_) {}
           try { window.lenis?.resize?.(); } catch (_) {}
         },
@@ -316,6 +316,7 @@ export function initBarba({ initContainer }) {
         after() {}
       },
 
+      // ── Panel Nav ──────────────────────────────────────────────────────────
       {
         name: "panel-nav",
         sync: false,
@@ -330,31 +331,35 @@ export function initBarba({ initContainer }) {
         },
 
         async afterEnter(data) {
-          reinitWebflowIX2();
+          destroyAndInitIX2();
           resetWCurrent();
 
           _postTransitionCallbacks = [];
 
-          await initContainer(data?.next?.container || document, {
-            isFirstLoad: false,
-            isNavigation: true,
-            namespace: getNamespace(data, "next"),
-            path: data?.next?.url?.path || window.location.pathname,
-            deferLenisStart: true,
-            onPostTransition: (fn) => _postTransitionCallbacks.push(fn)
-          });
+          try {
+            await initContainer(data?.next?.container || document, {
+              isFirstLoad: false,
+              isNavigation: true,
+              namespace: getNamespace(data, "next"),
+              path: data?.next?.url?.path || window.location.pathname,
+              deferLenisStart: true,
+              onPostTransition: (fn) => _postTransitionCallbacks.push(fn)
+            });
 
-          flushPostTransition();
+            flushPostTransition();
+            readyWebflow();
+            resetWCurrent();
 
-          try { window.ScrollTrigger?.refresh(); } catch (_) {}
-
-          hardScrollReset();
-          unlockTransition();
-
-          try { window.lenis?.resize?.(); } catch (_) {}
+            try { window.ScrollTrigger?.refresh(); } catch (_) {}
+            hardScrollReset();
+          } finally {
+            unlockTransition();
+            try { window.lenis?.resize?.(); } catch (_) {}
+          }
         }
       },
 
+      // ── Slide (default) ────────────────────────────────────────────────────
       {
         name: "slide",
         sync: true,
@@ -371,7 +376,6 @@ export function initBarba({ initContainer }) {
 
           killAllScrollTriggers();
           restoreOutgoingVars();
-
           destroyPage(getNamespace(data, "current"));
 
           if (!gsap) {
@@ -379,6 +383,7 @@ export function initBarba({ initContainer }) {
             return;
           }
 
+          // Freeze outgoing page at current scroll position
           gsap.set(data.current.container, {
             position: "fixed",
             top: -scrollY,
@@ -390,22 +395,21 @@ export function initBarba({ initContainer }) {
             y: 0
           });
 
-          const overlay = ensureOverlay(data.current.container);
-          resetOverlay(data.current.container);
+          // Global overlay (z-index:2) sits between outgoing (1) and incoming (3)
+          const overlay = getSlideOverlay();
+          gsap.set(overlay, { display: "block", opacity: 0 });
 
-          gsap.set(data.next.container, { zIndex: 2 });
           data.current.container.style.pointerEvents = "none";
           data.next.container.style.pointerEvents = "none";
 
+          // Animate: outgoing slides up, overlay fades in to darken it
           const leaveTl = gsap.timeline();
 
-          if (overlay) {
-            leaveTl.to(overlay, {
-              opacity: 0.45,
-              duration: VT_DURATION,
-              ease: VT_EASE
-            }, 0);
-          }
+          leaveTl.to(overlay, {
+            opacity: 0.5,
+            duration: VT_DURATION,
+            ease: VT_EASE
+          }, 0);
 
           leaveTl.to(data.current.container, {
             y: "-25vh",
@@ -425,47 +429,61 @@ export function initBarba({ initContainer }) {
           const container = data?.next?.container;
           if (!container) return;
 
-          hardScrollReset();
+          // Hide incoming while it initializes so it doesn't cover the leave animation
+          gsap.set(container, { autoAlpha: 0 });
 
-          resetIX2CSSVars();
-          syncWebflowPageIdFromNextHtml(data?.next?.html || "");
-          resetWCurrent();
+          try {
+            hardScrollReset();
+            resetIX2CSSVars();
+            syncWebflowPageIdFromNextHtml(data?.next?.html || "");
+            resetWCurrent();
 
-          _postTransitionCallbacks = [];
+            _postTransitionCallbacks = [];
 
-          await initContainer(container, {
-            isFirstLoad: false,
-            isNavigation: true,
-            namespace: getNamespace(data, "next"),
-            path: data?.next?.url?.path || window.location.pathname,
-            deferLenisStart: true,
-            onPostTransition: (fn) => _postTransitionCallbacks.push(fn)
-          });
+            await initContainer(container, {
+              isFirstLoad: false,
+              isNavigation: true,
+              namespace: getNamespace(data, "next"),
+              path: data?.next?.url?.path || window.location.pathname,
+              deferLenisStart: true,
+              onPostTransition: (fn) => _postTransitionCallbacks.push(fn)
+            });
 
-          try { window.ScrollTrigger?.refresh(); } catch (_) {}
-          try { window.lenis?.resize?.(); } catch (_) {}
+            // Position incoming below viewport, then slide it up
+            gsap.set(container, {
+              position: "fixed",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100vh",
+              y: "100vh",
+              zIndex: 3,
+              autoAlpha: 1,
+              pointerEvents: "none"
+            });
 
-          prepareIncomingContainerForSlide(container);
+            try { window.ScrollTrigger?.refresh(); } catch (_) {}
+            try { window.lenis?.resize?.(); } catch (_) {}
 
-          await gsap.to(container, {
-            y: 0,
-            duration: VT_DURATION,
-            ease: VT_EASE
-          });
+            await gsap.to(container, {
+              y: 0,
+              duration: VT_DURATION,
+              ease: VT_EASE
+            });
 
-          destroyAndInitIX2();
-          resetWCurrent();
+            destroyAndInitIX2();
+            resetWCurrent();
 
-          try { window.ScrollTrigger?.refresh(); } catch (_) {}
+            try { window.ScrollTrigger?.refresh(); } catch (_) {}
 
-          flushPostTransition();
-
-          clearContainerProps(container);
-
-          hardScrollReset();
-          unlockTransition();
-
-          try { window.lenis?.resize?.(); } catch (_) {}
+            flushPostTransition();
+            clearContainerProps(container);
+            hardScrollReset();
+          } finally {
+            container.style.pointerEvents = "";
+            unlockTransition();
+            try { window.lenis?.resize?.(); } catch (_) {}
+          }
 
           readyWebflow();
           resetWCurrent();
@@ -477,8 +495,10 @@ export function initBarba({ initContainer }) {
             isFirstLoad: true,
             isNavigation: false,
             namespace: getNamespace(data, "next"),
-            path: data?.next?.url?.path || window.location.pathname
+            path: data?.next?.url?.path || window.location.pathname,
+            deferLenisStart: true
           });
+          startLenis();
           try { window.ScrollTrigger?.refresh(); } catch (_) {}
           try { window.lenis?.resize?.(); } catch (_) {}
         },
@@ -486,5 +506,19 @@ export function initBarba({ initContainer }) {
         after() {}
       }
     ]
+  });
+}
+
+function prepareIncomingContainerForProject(container) {
+  if (!window.gsap || !container) return;
+  window.gsap.set(container, {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100vh",
+    zIndex: 2,
+    pointerEvents: "none",
+    opacity: 1
   });
 }

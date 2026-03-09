@@ -36,30 +36,6 @@ function _doUnlock() {
   startLenis();
 }
 
-export function ensureOverlay(container) {
-  if (!container) return null;
-
-  let el = container.querySelector(":scope > .page-overlay");
-  if (!el) {
-    el = document.createElement("div");
-    el.className = "page-overlay";
-    el.setAttribute("aria-hidden", "true");
-    container.insertBefore(el, container.firstChild);
-  }
-  return el;
-}
-
-export function resetOverlay(container) {
-  const el = container?.querySelector(":scope > .page-overlay");
-  if (!el) return;
-
-  if (window.gsap) {
-    window.gsap.set(el, { opacity: 0 });
-  } else {
-    el.style.opacity = "0";
-  }
-}
-
 export function markHistoryNavigation() {
   _historyNavigation = true;
 }

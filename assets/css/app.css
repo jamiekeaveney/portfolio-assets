@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Lenis overrides
+   Lenis
    ========================================================================== */
 
 html.lenis,
@@ -33,7 +33,7 @@ html.lenis body {
   --_transform---off: 1;
 }
 
-/* Presentational states — style only, no passthrough */
+/* Presentational states */
 .is-active,
 [data-state~="current"]:is(.w--current, :has(.w--current)),
 [data-state~="external"]:is([target="_blank"], :has([target="_blank"])) {
@@ -41,7 +41,7 @@ html.lenis body {
   --_state---false: 1;
 }
 
-/* Structural states — style + passthrough */
+/* Structural states */
 [data-state~="checked"]:is(:checked, :has(:checked)),
 [data-state~="open"]:is(.w--open, :has(.w--open)),
 [data-state~="expanded"]:is([aria-expanded="true"], :has([aria-expanded="true"])) {
@@ -150,10 +150,10 @@ svg[viewBox] {
 }
 
 /* ==========================================================================
-   Page transition — CSS layer
+   Page transitions
    ========================================================================== */
 
-/* Busy cursor + block interactions during transition */
+/* Block all interaction and show busy cursor during transitions */
 html.is-transitioning,
 html.is-transitioning * {
   cursor: progress !important;
@@ -163,40 +163,29 @@ html.is-transitioning body {
   pointer-events: none;
 }
 
-/* GPU-promote both containers during transition so
-   transform/opacity run on compositor, off main thread */
-html.is-transitioning [data-barba="container"] {
-  will-change: transform, opacity;
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
-}
-
-/* Prevent overscroll/bounce interfering with the slide */
 html.is-transitioning {
   overflow: hidden;
 }
 
-
-
-
-
-
-
-
-
-[data-barba="container"] {
-  isolation: isolate;
+/* GPU-promote containers during transitions */
+html.is-transitioning [data-barba="container"] {
+  will-change: transform, opacity;
+  backface-visibility: hidden;
 }
 
-.page-overlay {
-  position: absolute;
+/* Slide transition overlay — sits between outgoing (z:1) and incoming (z:3) */
+#barba-slide-overlay {
+  position: fixed;
   inset: 0;
-  z-index: 9999;
-  pointer-events: none;
-  background: rgba(0, 0, 0, 1);
+  z-index: 2;
+  background: #000;
   opacity: 0;
+  display: none;
+  pointer-events: none;
+  will-change: opacity;
 }
 
+/* Project-to-project handoff overlay root */
 [data-transition-overlay-root] {
   position: fixed;
   inset: 0;
@@ -205,11 +194,12 @@ html.is-transitioning {
   overflow: visible;
 }
 
+/* Proxy elements used during p2p handoff animation */
 [data-transition-proxy] {
   position: fixed;
   margin: 0;
   pointer-events: none;
-  will-change: transform, width, height, opacity, border-radius, left, top;
+  will-change: left, top, width, height, opacity, border-radius;
   transform-origin: top left;
   backface-visibility: hidden;
 }
@@ -233,16 +223,15 @@ html.is-transitioning {
   overflow: visible;
 }
 
+/* Hero elements hidden during p2p handoff (real elements replaced by proxies) */
 [data-transition-hidden-target] {
   opacity: 0 !important;
   visibility: hidden !important;
 }
 
-
-
-
-
-
+/* ==========================================================================
+   Pinned project footer
+   ========================================================================== */
 
 .pinned-section.start-transition .case-name-loading {
   opacity: 1;
