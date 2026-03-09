@@ -12,18 +12,24 @@ function dom() {
   if (!w) return null;
   const $ = (s) => w.querySelector(s);
   return {
-    wrap: w, panel: $(".loader-panel"), bar: $("[data-loader-bar]"),
+    wrap: w,
+    panel: $(".loader-panel"),
+    bar: $("[data-loader-bar]"),
     spinner: $("[data-loader-spinner]"),
-    progress: $("[data-loader-progress]"), block: $("[data-loader-block]"),
-    top: $("[data-loader-top]"), bot: $("[data-loader-bot]"),
+    progress: $("[data-loader-progress]"),
+    block: $("[data-loader-block]"),
+    top: $("[data-loader-top]"),
+    bot: $("[data-loader-bot]")
   };
 }
 
 function mkDigs(n) {
   const s = n < 10 ? "0" + n : String(n);
-  return s.split("").concat("%").map((c, i) =>
-    `<span class="loader-digit" style="--d:${i}">${c}</span>`
-  ).join("");
+  return s
+    .split("")
+    .concat("%")
+    .map((c, i) => `<span class="loader-digit" style="--d:${i}">${c}</span>`)
+    .join("");
 }
 
 function onLast(el, sel) {
@@ -65,13 +71,23 @@ async function exitNum(e) {
   e.block.classList.remove("is-exiting");
 }
 
+function lockLoaderScroll() {
+  stopLenis();
+  document.documentElement.style.overflow = "hidden";
+  document.body.style.overflow = "hidden";
+}
+
+function unlockLoaderScroll() {
+  document.documentElement.style.overflow = "";
+  document.body.style.overflow = "";
+  startLenis();
+}
+
 export function loaderShow() {
   const e = dom();
   if (!e) return Promise.resolve();
 
-  stopLenis();
-  document.documentElement.style.overflow = "hidden";
-  document.body.style.overflow = "hidden";
+  lockLoaderScroll();
 
   const g = window.gsap;
   e.top.innerHTML = mkDigs(0);
@@ -82,25 +98,30 @@ export function loaderShow() {
     Object.assign(e.wrap.style, {
       display: "block",
       pointerEvents: "auto",
-      opacity: "1"
+      opacity: "1",
+      visibility: "visible"
     });
     posY(e, 0);
     return Promise.resolve();
   }
 
   g.killTweensOf(e.wrap);
-  g.set(e.wrap, { display: "block", pointerEvents: "auto", autoAlpha: 1 });
+  g.set(e.wrap, {
+    display: "block",
+    pointerEvents: "auto",
+    autoAlpha: 1
+  });
 
   e.block.style.transition = "none";
   e.bar.style.transition = "none";
   posY(e, 0);
 
-  requestAnimationFrame(() => {
+  requestAnimationFrame(() =>
     requestAnimationFrame(() => {
       e.block.style.transition = "";
       e.bar.style.transition = "";
-    });
-  });
+    })
+  );
 
   return Promise.resolve();
 }
@@ -108,19 +129,22 @@ export function loaderShow() {
 export function loaderHide() {
   const e = dom();
 
-  document.documentElement.style.overflow = "";
-  document.body.style.overflow = "";
-  startLenis();
+  unlockLoaderScroll();
 
   if (!e) return Promise.resolve();
 
   const g = window.gsap;
   if (!g) {
-    e.wrap.style.cssText = "display:none;pointer-events:none;opacity:0";
+    e.wrap.style.cssText = "display:none;pointer-events:none;opacity:0;visibility:hidden;";
     return Promise.resolve();
   }
 
-  g.set(e.wrap, { display: "none", pointerEvents: "none", autoAlpha: 0 });
+  g.set(e.wrap, {
+    display: "none",
+    pointerEvents: "none",
+    autoAlpha: 0
+  });
+
   e.block.style.transition = "";
   e.block.style.transform = "";
   e.bar.style.width = "0%";
@@ -136,6 +160,7 @@ export async function loaderProgressTo({ onRevealStart } = {}) {
 
   const g = window.gsap;
   const steps = seq();
+
   if (!g) {
     e.top.innerHTML = mkDigs(100);
     posY(e, 100);
@@ -151,7 +176,12 @@ export async function loaderProgressTo({ onRevealStart } = {}) {
 
   if (typeof onRevealStart === "function") onRevealStart();
 
-  g.to(e.wrap, { autoAlpha: 0, duration: FADE_DURATION, ease: "power2.out" });
+  g.to(e.wrap, {
+    autoAlpha: 0,
+    duration: FADE_DURATION,
+    ease: "power2.out"
+  });
+
   await exitNum(e);
 }
 
@@ -165,11 +195,13 @@ export function loaderOutro() {
   const current = parseFloat(getComputedStyle(e.wrap).opacity);
   if (current <= 0.01) return Promise.resolve();
 
-  return g.to(e.wrap, {
-    autoAlpha: 0,
-    duration: 0.15,
-    ease: "power1.out"
-  }).then(() => {});
+  return g
+    .to(e.wrap, {
+      autoAlpha: 0,
+      duration: 0.15,
+      ease: "power1.out"
+    })
+    .then(() => {});
 }
 
 export async function runLoader(duration = 5.0, _container = document, opts = {}) {

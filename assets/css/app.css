@@ -187,7 +187,7 @@ html.is-transitioning {
 .page-overlay {
   position: absolute;
   inset: 0;
-  z-index: 999;
+  z-index: 9999;
   pointer-events: none;
   background: rgba(0, 0, 0, 1);
   opacity: 0;
@@ -232,6 +232,10 @@ html.is-transitioning {
 [data-transition-hidden-target] {
   opacity: 0 !important;
   visibility: hidden !important;
+}
+
+[data-barba="container"] {
+  isolation: isolate;
 }
 
 

@@ -84,9 +84,9 @@ export function bindTransitionLockSafety() {
   });
 
   // IMPORTANT:
-  // On browser history nav we ONLY mark the event and clear stale handoff state.
-  // We do NOT unlock or scrollTo(0) here, because Barba still needs the current
-  // page's real scroll position for the outgoing parallax/freeze logic.
+  // On browser back/forward, DO NOT unlock or scroll-reset here.
+  // Barba still needs the current page's real scroll position to capture
+  // the outgoing page correctly for the leave/parallax animation.
   window.addEventListener("popstate", () => {
     markHistoryNavigation();
     clearProjectNextTransition();
